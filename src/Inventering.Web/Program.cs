@@ -37,7 +37,7 @@ var vismaMode = builder.Configuration["Visma:Mode"] ?? "Fake";
 if (vismaMode.Equals("Adk", StringComparison.OrdinalIgnoreCase))
 {
     var adk = builder.Configuration.GetSection("Visma:Adk").Get<AdkOptions>() ?? new AdkOptions();
-    builder.Services.AddSingleton<IVismaGateway>(new AdkVismaGateway(adk));
+    builder.Services.AddSingleton<IVismaGateway>(new AdkBridgeGateway(adk));
 }
 else builder.Services.AddSingleton<IVismaGateway, FakeVismaGateway>();
 

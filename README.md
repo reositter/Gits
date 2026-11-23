@@ -12,15 +12,18 @@ till Visma Administration via ADK. Bakgrund och designbeslut finns i [docs/ARKIT
 | Flera mobiler samtidigt, summering per artikel, varningar | Klar |
 | Admin: starta/låsa/granska/stryka rader/korrigera/skicka, CSV-export | Klar |
 | Inloggning, roller, kontospärr, TOTP-tvåfaktor, händelselogg | Klar |
-| **Koppling mot Visma (ADK)** | **Ej klar** – `AdkVismaGateway` är ett skal. Fylls i med befintlig ADK-kod. |
+| Signerad inlämning per användare, kontrollsumma, spårbarhet på radnivå | Klar |
+| Koppling mot Visma via ADK (AvSynkLib), läser artiklar och skriver till inventeringsunderlaget | Byggd, **ej testad mot riktig Visma** |
 
-Tills ADK-delen är klar körs tjänsten mot en låtsas-Visma (`"Visma:Mode": "Fake"`) med några testartiklar.
+`"Visma:Mode": "Fake"` ger en låtsas-Visma med testartiklar (standard). `"Adk"` kopplar mot riktig Visma.
 
 ## Projekt
 
 ```
-src/Inventering.Core    Domän, summering, IVismaGateway, Fake- och ADK-gateway
-src/Inventering.Web     ASP.NET Core (.NET 8): API, SQLite, inloggning, wwwroot (mobil + admin)
+src/Inventering.Core       Domän, summering, IVismaGateway, Fake- och ADK-gateway
+src/Inventering.Web        ASP.NET Core (.NET 8): API, SQLite, inloggning, wwwroot (mobil + admin)
+src/Inventering.AdkBridge  .NET Framework 4.8 x86-konsol som gör ADK-anropen (AvSynkLib/AdkNet4Wrapper)
+lib/                       AvSynkLib.dll + AdkNet4Wrapper.dll – kopieras hit, checkas inte in
 tests/Inventering.Tests Enhetstester och API-flödestester
 ```
 
@@ -38,14 +41,41 @@ ASPNETCORE_ENVIRONMENT=Development dotnet run --urls http://0.0.0.0:5080
   i datakatalogen. Byt lösenordet och radera filen.
 - I Development krävs inte tvåfaktor för admin. I produktion krävs det.
 
+## Visma-kopplingen (ADK)
+
+`AdkNet4Wrapper.dll` är C++/CLI för .NET Framework och kan inte laddas i .NET 8. Därför gör en
+separat 32-bitars process, `Inventering.AdkBridge.exe` (.NET Framework 4.8), allt ADK-arbete.
+Webbtjänsten startar den per anrop, skickar JSON via stdin och läser JSON från stdout. Lösenord
+skickas aldrig som argument. Det isolerar också ADK:s minnesläckor och krascher.
+
+| Kommando | ADK | Vad |
+|---|---|---|
+| `status` | `AvCompany`, `AvInventoryArticle` | Produkt, ADK-version och antal rader i inventeringsunderlaget |
+| `articles` | `AvArticle` | Artikelnr, benämning, `BarCode` (EAN), enhet, `QuantityInStock`, `StockGoods`, `Inactive` |
+| `inventory-write` | `AvInventoryArticle` | Sätter `Quantity` och `Date` per artikel i **Vismas inventeringsunderlag** |
+
+**Arbetsgång i Visma:**
+1. Skapa inventeringsunderlaget i Visma Administration.
+2. Räkna med mobilerna, lämna in, granska och skicka från admin-sidan. Räknat antal hamnar då i underlaget.
+3. Slutför inventeringen i Visma, så att lagret uppdateras från underlaget. Det är ett sista
+   godkännande i Visma, och Vismas egen inventeringshistorik och lagervärdering används.
+
+Artiklar som saknas i underlaget rapporteras som fel per artikel. Under **Kontrollera Visma** på
+admin-sidan syns om underlaget finns.
+
 ## Installera på Visma-servern (Windows)
 
-1. Publicera. Använd `win-x86` om ADK-DLL:en är 32-bitars, vilket den normalt är:
+1. Kopiera `AvSynkLib.dll` och `AdkNet4Wrapper.dll` till `lib/`, t.ex. från `_lib` i ett befintligt ADK-projekt.
+2. Publicera webbtjänsten och bryggan:
    ```
-   dotnet publish src/Inventering.Web -c Release -r win-x86 --self-contained -o C:\Inventering
+   dotnet publish src/Inventering.Web -c Release -r win-x64 --self-contained -o C:\Inventering
+   dotnet publish src/Inventering.AdkBridge -c Release -o C:\Inventering\AdkBridge
    ```
-2. Ställ in `C:\Inventering\appsettings.json`:
-   - `Visma:Mode` = `Adk` och sökvägar under `Visma:Adk`
+   Kopiera även `lib\*.dll` till `C:\Inventering\AdkBridge` om de inte kom med.
+3. Ställ in `C:\Inventering\appsettings.json`:
+   - `Visma:Mode` = `Adk`
+   - `Visma:Adk:CompanyPath` = företagsmappen, t.ex. `...\Företag\FTG3`
+   - `Visma:Adk:User` och `Password` om inloggning är aktiverad i Visma
    - HTTPS, se nedan
 3. Installera och starta som tjänst (kör som administratör):
    ```
@@ -101,7 +131,7 @@ Lägg in en länk eller integrationspost, enligt befintligt upplägg med `dynami
 
 ## Nästa steg
 
-1. Implementera `AdkVismaGateway` med befintlig ADK-kod: läsa artiklar (artikelnr, benämning,
-   EAN, enhet, saldo, lagerförd) och skriva inventerat antal. Testa i ett testföretag först.
+1. Testa ADK-bryggan mot ett **testföretag** i Visma. Kör först `status`, sedan `articles`, sedan
+   `inventory-write` på några artiklar. Kontrollera underlaget i Visma.
 2. Ta fram certifikat och DNS-namn, och installera på servern.
 3. Gå över till EF Core-migreringar innan första produktionssättningen. Schemat skapas nu med `EnsureCreated`.

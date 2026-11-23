@@ -22,6 +22,9 @@ public class FakeVismaGateway : IVismaGateway
 
     public string Name => "Fake (test)";
 
+    public Task<VismaStatus> GetStatusAsync(CancellationToken ct = default) =>
+        Task.FromResult(new VismaStatus(Name, "Testdata – inget skrivs till Visma", false, null, null));
+
     public IReadOnlyCollection<Article> Current => _articles.Values.ToList();
 
     public void SetStock(string articleNo, decimal qty) => _articles[articleNo].StockQuantity = qty;

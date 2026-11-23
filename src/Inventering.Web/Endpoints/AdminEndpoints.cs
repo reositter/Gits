@@ -24,6 +24,13 @@ public static class AdminEndpoints
             visma = visma.Name, articles = cache.Count, lastRefresh = cache.LastRefresh, lastError = cache.LastError,
         });
 
+        // Anropar Visma (ADK) – kan ta några sekunder.
+        g.MapGet("/visma-status", async (IVismaGateway visma) =>
+        {
+            try { return Results.Ok(await visma.GetStatusAsync()); }
+            catch (Exception ex) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
+        });
+
         g.MapPost("/articles/refresh", async (ArticleCache cache) =>
         {
             try { await cache.RefreshAsync(); return Results.Ok(new { count = cache.Count }); }

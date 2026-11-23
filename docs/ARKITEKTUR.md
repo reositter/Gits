@@ -60,7 +60,15 @@ Saldoförändringar under inventeringen: vi sparar Visma-saldot när inventering
 ("ögonblicksbild") och visar om saldot ändrats innan godkännande. Bäst är att inventera
 när det inte sker leveranser, alternativt per lagerställe/zon.
 
-## 4. Skrivning till Visma via ADK  [VERIFIERA]
+## 4. Skrivning till Visma via ADK
+
+**Beslut (efter genomgång av befintlig kod och AvSynkLib):** väg A. Räknat antal skrivs till Vismas
+inventeringsunderlag (`ADK_DB_INVENTORY_ARTICLE` / `AvInventoryArticle.Quantity` + `Date`). Lagret
+uppdateras när användaren slutför inventeringen i Visma. ADK körs i en separat .NET Framework 4.8
+x86-process (`Inventering.AdkBridge`), eftersom AdkNet4Wrapper är C++/CLI och inte kan laddas i .NET 8.
+Se README.
+
+Ursprunglig analys:
 
 Två möjliga vägar – vilken som gäller beror på vad er ADK-version exponerar och hur ni gjort tidigare:
 

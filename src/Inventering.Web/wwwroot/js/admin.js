@@ -34,7 +34,9 @@ async function sessionsView() {
       <h2>Visma</h2>
       <p class="muted">Koppling: <b>${esc(status.visma)}</b> · ${status.articles} artiklar i cache · senast uppdaterad ${fmtTime(status.lastRefresh) || 'aldrig'}</p>
       ${status.lastError ? `<div class="msg bad">Senaste fel: ${esc(status.lastError)}</div>` : ''}
-      <button id="refresh" class="small">Uppdatera artiklar från Visma</button> <span id="rmsg"></span>
+      <button id="refresh" class="small">Uppdatera artiklar från Visma</button>
+      <button id="checkVisma" class="small">Kontrollera Visma</button> <span id="rmsg"></span>
+      <div id="vstatus"></div>
     </div>
     <div class="card">
       <h2>Ny inventering</h2>
@@ -60,6 +62,15 @@ async function sessionsView() {
     $('#rmsg').textContent = 'Hämtar…';
     try { const r = await api('POST', '/api/admin/articles/refresh'); $('#rmsg').textContent = `${r.count} artiklar hämtade.`; }
     catch (e) { $('#rmsg').textContent = e.message; }
+  };
+  $('#checkVisma').onclick = async () => {
+    showMsg($('#vstatus'), 'Kontrollerar…', 'warn');
+    try {
+      const v = await api('GET', '/api/admin/visma-status');
+      showMsg($('#vstatus'), `${v.name}${v.details ? ' – ' + v.details : ''}` +
+        (v.writesToInventoryList ? ` · Inventeringsunderlag: ${v.inventoryListRows ? v.inventoryListRows + ' artiklar' + (v.inventoryListDate ? ', ' + fmtTime(v.inventoryListDate) : '') : 'SAKNAS – skapa det i Visma innan du skickar'}` : ''),
+        v.writesToInventoryList && !v.inventoryListRows ? 'warn' : 'ok');
+    } catch (e) { showMsg($('#vstatus'), e.message); }
   };
   $('#newForm')?.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -157,7 +168,8 @@ function sendDialog(s, arts, uncounted) {
   dlg.innerHTML = `
     <form method="dialog" id="sendForm">
       <h2>Skicka till Visma</h2>
-      <p>${arts.length} artiklar får sitt lagersaldo satt till räknat antal (summan av alla räkningar per artikel).</p>
+      <p>${arts.length} artiklar skickas med räknat antal (summan av alla inlämnade räkningar per artikel).</p>
+      <div id="vinfo" class="muted">Kontrollerar Visma…</div>
       ${changed ? `<div class="msg warn">${changed} artiklar har fått ändrat saldo i Visma sedan inventeringen startade (försäljning/inleverans under räkningen). Kontrollera dem innan du skickar.</div>` : ''}
       ${uncounted.length ? `<label class="row" style="color:var(--text)"><input type="checkbox" id="zero" style="width:auto;flex:0"> Sätt ${uncounted.length} ej räknade lagerartiklar till 0</label>` : ''}
       <label class="row" style="color:var(--text)"><input type="checkbox" id="confirm" style="width:auto;flex:0" required> Jag har granskat inventeringen och vill uppdatera Visma</label>
@@ -165,6 +177,15 @@ function sendDialog(s, arts, uncounted) {
       <div class="row" style="margin-top:12px"><button value="cancel" formnovalidate>Avbryt</button><button class="primary" id="doSend" value="send">Skicka</button></div>
     </form>`;
   dlg.showModal();
+  let toInventoryList = false;
+  api('GET', '/api/admin/visma-status').then((v) => {
+    toInventoryList = v.writesToInventoryList;
+    $('#vinfo', dlg).innerHTML = !v.writesToInventoryList
+      ? `<div class="msg warn">${esc(v.name)}: ${esc(v.details ?? '')}</div>`
+      : v.inventoryListRows
+        ? `<div class="msg ok">Antalen skrivs till Vismas <b>inventeringsunderlag</b> (${v.inventoryListRows} artiklar). Lagret ändras först när du slutför inventeringen i Visma.</div>`
+        : `<div class="msg bad">Det finns inget inventeringsunderlag i Visma. Skapa underlaget i Visma först – annars kan inget skrivas.</div>`;
+  }).catch((e) => { $('#vinfo', dlg).innerHTML = `<div class="msg bad">Kunde inte nå Visma: ${esc(e.message)}</div>`; });
   $('#doSend', dlg).onclick = async (e) => {
     e.preventDefault();
     if (!$('#confirm', dlg).checked) return showMsg($('#dmsg', dlg), 'Bekräfta först.', 'warn');
@@ -173,7 +194,8 @@ function sendDialog(s, arts, uncounted) {
     try {
       const r = await api('POST', `/api/admin/sessions/${s.id}/send`, { confirm: true, zeroUncounted: $('#zero', dlg)?.checked ?? false });
       dlg.close();
-      alert(`Klart: ${r.ok} uppdaterade${r.failed ? `, ${r.failed} misslyckades` : ''}.`);
+      alert(`Klart: ${r.ok} artiklar skrivna${r.failed ? `, ${r.failed} misslyckades` : ''}.` +
+        (toInventoryList ? '\n\nGå nu in i Visma Administration och slutför inventeringen (uppdatera lagret från inventeringsunderlaget).' : ''));
       sessionView(s.id);
     } catch (err) { showMsg($('#dmsg', dlg), err.message); e.target.disabled = false; }
   };
