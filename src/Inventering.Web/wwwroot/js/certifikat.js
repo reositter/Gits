@@ -9,7 +9,7 @@ const STEPS = {
   ios: [
     'Tryck på <b>Hämta certifikat</b> och välj <b>Tillåt</b>.',
     'Öppna <b>Inställningar</b> och tryck på <b>Profil hämtad</b> högst upp. Välj <b>Installera</b> och ange telefonens kod.',
-    'Gå till <b>Inställningar → Allmänt → Om → Certifikatförtroende</b> och slå på <b>Inventering</b>.',
+    'Gå till <b>Inställningar → Allmänt → Om → Certifikatförtroende</b> och slå på <b>Inventering rotcertifikat</b>.',
   ],
   android: [
     'Tryck på <b>Hämta certifikat</b>.',
