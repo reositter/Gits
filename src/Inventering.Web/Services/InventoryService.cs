@@ -15,7 +15,7 @@ public class InventoryService(AppDb db, ArticleCache cache, CompanyService compa
         await cache.RefreshAsync(companyId); // Färskt saldo som utgångsläge – kastar om Visma inte svarar.
         var s = new InventorySession { CompanyId = companyId, Name = name.Trim(), CreatedByUserId = userId, Status = SessionStatus.Open };
         s.Snapshot = cache.All(companyId).Where(a => a.IsStockItem)
-            .Select(a => new StockSnapshot { ArticleNo = a.ArticleNo, Quantity = a.StockQuantity }).ToList();
+            .Select(a => new StockSnapshot { ArticleNo = a.ArticleNo, Quantity = a.StockQuantity, PurchasePrice = a.PurchasePrice }).ToList();
         db.Sessions.Add(s);
         await db.SaveChangesAsync();
         return s;
@@ -28,7 +28,8 @@ public class InventoryService(AppDb db, ArticleCache cache, CompanyService compa
         var snapshot = await db.Snapshots.AsNoTracking().Where(s => s.SessionId == session.Id)
             .ToDictionaryAsync(s => s.ArticleNo, s => s.Quantity, StringComparer.OrdinalIgnoreCase);
         var users = await db.Users.AsNoTracking().ToDictionaryAsync(u => u.Id, u => string.IsNullOrEmpty(u.DisplayName) ? u.UserName : u.DisplayName);
-        var summary = InventoryAggregator.Summarize(lines, snapshot, cache.ByArticleNo(session.CompanyId), users);
+        var summary = InventoryAggregator.Summarize(lines, snapshot, cache.ByArticleNo(session.CompanyId), users,
+            compareCurrentStock: session.Status is SessionStatus.Open or SessionStatus.Locked);
         var uncounted = InventoryAggregator.Uncounted(lines, cache.All(session.CompanyId));
         return (summary, uncounted);
     }

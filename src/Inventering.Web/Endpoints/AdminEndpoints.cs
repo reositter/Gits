@@ -193,6 +193,24 @@ public static class AdminEndpoints
             return Results.File(Bom(sb), "text/csv", FileName(http, id, "artiklar"));
         });
 
+        // ---- Rapporter ----
+        g.MapGet("/sessions/{id:int}/report.html", async (int id, bool? onlyDiff, ReportService reports, AppDb db, HttpContext http) =>
+        {
+            var s = await CountEndpoints.SessionAsync(db, http, id);
+            if (s is null) return Results.NotFound();
+            var model = await reports.BuildAsync(s, http.Company(), http.User.Identity?.Name ?? "");
+            return Results.Content(HtmlReport.Render(model, onlyDiff == true), "text/html; charset=utf-8");
+        });
+
+        g.MapGet("/sessions/{id:int}/report.xlsx", async (int id, ReportService reports, AppDb db, HttpContext http) =>
+        {
+            var s = await CountEndpoints.SessionAsync(db, http, id);
+            if (s is null) return Results.NotFound();
+            var model = await reports.BuildAsync(s, http.Company(), http.User.Identity?.Name ?? "");
+            return Results.File(ExcelReport.Render(model), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                FileName(http, id, "rapport").Replace(".csv", ".xlsx"));
+        });
+
         // Alla rader med full spårbarhet (vem, enhet, tid, inlämning, struken av).
         g.MapGet("/sessions/{id:int}/lines.csv", async (int id, AppDb db, ArticleCache cache, HttpContext http) =>
         {

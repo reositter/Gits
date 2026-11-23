@@ -33,6 +33,8 @@ namespace Inventering.AdkBridge
         public double StockQuantity { get; set; }
         public bool IsStockItem { get; set; }
         public bool Inactive { get; set; }
+        /// <summary>Beräknat inpris (AvArticle.EstimatedPurchasePrice).</summary>
+        public double PurchasePrice { get; set; }
     }
 
     public class WriteResultDto

@@ -49,6 +49,7 @@ builder.Services.AddSingleton<ArticleCache>();
 builder.Services.AddSingleton<BarcodeService>();
 builder.Services.AddHostedService<ArticleRefreshService>();
 builder.Services.AddScoped<InventoryService>();
+builder.Services.AddScoped<ReportService>();
 builder.Services.AddSingleton<PasswordService>();
 
 // ---- Inloggning ----

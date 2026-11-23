@@ -102,8 +102,9 @@ async function sessionView(id) {
         ${s.status === 'Open' ? `<button data-act="lock" class="primary">Lås räkningen</button>` : ''}
         ${s.status === 'Locked' ? `<button data-act="reopen">Öppna för räkning igen</button><button id="sendBtn" class="primary">Godkänn och skicka till Visma…</button>` : ''}
         ${s.status === 'Open' || s.status === 'Locked' ? `<button data-act="cancel" class="danger">Avbryt inventering</button>` : ''}
-        <button onclick="location.href='/api/admin/sessions/${s.id}/export.csv'">Exportera per artikel</button>
-        <button onclick="location.href='/api/admin/sessions/${s.id}/lines.csv'">Exportera alla rader</button>
+        <a class="btn" href="/api/admin/sessions/${s.id}/report.html" target="_blank" rel="noopener">📄 Rapport</a>
+        <a class="btn" href="/api/admin/sessions/${s.id}/report.xlsx">📊 Excel</a>
+        <a class="btn" href="/api/admin/sessions/${s.id}/lines.csv">Alla rader (CSV)</a>
         <button id="reloadBtn">Uppdatera</button>
       </div>
       <div id="smsg"></div>

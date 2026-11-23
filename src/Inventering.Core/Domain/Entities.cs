@@ -65,6 +65,8 @@ public class Article
     public string? Ean { get; set; }
     public string? Unit { get; set; }
     public decimal StockQuantity { get; set; }
+    /// <summary>Inköpspris per enhet (Vismas beräknade inpris) – används för värde av differenser.</summary>
+    public decimal? PurchasePrice { get; set; }
     /// <summary>Lagerförd artikel (bara sådana kan inventeras).</summary>
     public bool IsStockItem { get; set; } = true;
     public DateTimeOffset UpdatedAt { get; set; }
@@ -91,6 +93,8 @@ public class StockSnapshot
     public int SessionId { get; set; }
     public string ArticleNo { get; set; } = "";
     public decimal Quantity { get; set; }
+    /// <summary>Inköpspris när inventeringen startades.</summary>
+    public decimal? PurchasePrice { get; set; }
 }
 
 /// <summary>En räkningsrad från en mobil. Sparas oförändrad; admin kan stryka men inte radera.</summary>

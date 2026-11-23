@@ -126,6 +126,7 @@ namespace Inventering.AdkBridge
                         StockQuantity = a.QuantityInStock,
                         IsStockItem = a.StockGoods,
                         Inactive = a.Inactive,
+                        PurchasePrice = a.EstimatedPurchasePrice,
                     });
                     a.MoveNext();
                 }

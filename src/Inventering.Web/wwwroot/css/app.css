@@ -82,3 +82,5 @@ details[open] summary::before { content: '▾ '; }
 #companyBtn { max-width: 40vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #companyBtn:disabled { opacity: 1; cursor: default; }
 @media (max-width: 480px) { header.bar { flex-wrap: wrap; } header.bar h1 { flex-basis: 100%; order: -1; } }
+a.btn { display: inline-flex; align-items: center; font: inherit; padding: 12px 16px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); color: var(--text); text-decoration: none; min-height: 44px; }
+a.btn:hover { background: var(--bg); }

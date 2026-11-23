@@ -16,7 +16,7 @@ public class FakeVismaGateway : IVismaGateway
         if (seed % 2 == 0)
         {
             void Add2(string no, string name, string? ean, decimal qty, string unit = "st") =>
-                _articles[no] = new Article { ArticleNo = no, Name = name, Ean = ean, StockQuantity = qty, Unit = unit, UpdatedAt = DateTimeOffset.UtcNow };
+                _articles[no] = new Article { ArticleNo = no, Name = name, Ean = ean, StockQuantity = qty, Unit = unit, PurchasePrice = 10 + no.Sum(c => c) % 90, UpdatedAt = DateTimeOffset.UtcNow };
             Add2("A100", "Gipsskiva 13 mm", "7320000000105", 120);
             Add2("A200", "Regel 45x95 (m)", null, 800, "m");
             Add2("A300", "Spik 75 mm (kg)", "7320000000303", 35, "kg");
@@ -24,7 +24,7 @@ public class FakeVismaGateway : IVismaGateway
             return;
         }
         void Add(string no, string name, string? ean, decimal qty, string unit = "st") =>
-            _articles[no] = new Article { ArticleNo = no, Name = name, Ean = ean, StockQuantity = qty, Unit = unit, UpdatedAt = DateTimeOffset.UtcNow };
+            _articles[no] = new Article { ArticleNo = no, Name = name, Ean = ean, StockQuantity = qty, Unit = unit, PurchasePrice = 5 + no.Sum(c => c) % 120, UpdatedAt = DateTimeOffset.UtcNow };
         Add("1001", "Skruv M6x20 (100-pack)", "7310000000011", 40);
         Add("1002", "Mutter M6 (100-pack)", "7310000000028", 25);
         Add("1003", "Bricka M6 (100-pack)", null, 12);
@@ -61,7 +61,7 @@ public class FakeVismaGateway : IVismaGateway
     private static Article Clone(Article a) => new()
     {
         ArticleNo = a.ArticleNo, Name = a.Name, Ean = a.Ean, Unit = a.Unit,
-        StockQuantity = a.StockQuantity, IsStockItem = a.IsStockItem, UpdatedAt = DateTimeOffset.UtcNow,
+        StockQuantity = a.StockQuantity, PurchasePrice = a.PurchasePrice, IsStockItem = a.IsStockItem, UpdatedAt = DateTimeOffset.UtcNow,
     };
 }
 

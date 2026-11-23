@@ -155,6 +155,21 @@ public class ApiFlowTests : IDisposable
         Assert.Equal(20, visma.Current.Single(a => a.ArticleNo == "1001").StockQuantity);
         Assert.Equal(25, visma.Current.Single(a => a.ArticleNo == "1002").StockQuantity); // ej räknad → orörd
 
+        // Rapporter
+        var html = await (await admin.GetAsync($"/api/admin/sessions/{sid}/report.html")).Content.ReadAsStringAsync();
+        Assert.Contains("Inventeringsrapport", html);
+        Assert.Contains("Demo AB", html);
+        Assert.Contains("Skruv M6x20", html);
+        var xlsx = await admin.GetAsync($"/api/admin/sessions/{sid}/report.xlsx");
+        Assert.Equal(HttpStatusCode.OK, xlsx.StatusCode);
+        using (var wb = new ClosedXML.Excel.XLWorkbook(await xlsx.Content.ReadAsStreamAsync()))
+        {
+            Assert.Equal(new[] { "Sammanfattning", "Artiklar", "Ej räknade", "Inlämningar", "Alla rader" }, wb.Worksheets.Select(w => w.Name));
+            var arts = wb.Worksheet("Artiklar");
+            Assert.Equal("1001", arts.Cell(2, 1).GetString());
+            Assert.Equal(20, arts.Cell(2, 5).GetDouble());
+        }
+
         // Det andra bolaget är helt separat: egna artiklar och inga inventeringar
         await Json(await admin.PostAsJsonAsync("/api/auth/company", new { companyId = other }));
         Assert.Empty((await Json(await admin.GetAsync("/api/admin/sessions"))).EnumerateArray());

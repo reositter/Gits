@@ -27,7 +27,8 @@ public static class InventoryAggregator
         IReadOnlyDictionary<string, decimal> snapshot,
         IReadOnlyDictionary<string, Article> articles,
         IReadOnlyDictionary<int, string> userNames,
-        decimal largeDeviationRatio = 0.5m)
+        decimal largeDeviationRatio = 0.5m,
+        bool compareCurrentStock = true)
     {
         var active = lines.Where(l => !l.IsVoided).ToList();
 
@@ -58,9 +59,10 @@ public static class InventoryAggregator
                 if (snap == 0 ? counted != 0 && diff >= 10 : diff / Math.Abs(snap) >= largeDeviationRatio)
                     warnings.Add("Stor avvikelse mot saldo");
 
-                var current = art?.StockQuantity ?? snap;
+                // Efter skickad inventering är "aktuellt saldo" inventeringens eget resultat – jämför inte då.
+                var current = compareCurrentStock ? art?.StockQuantity ?? snap : snap;
                 if (current != snap)
-                    warnings.Add($"Saldot i Visma har ändrats under inventeringen ({snap} → {current})");
+                    warnings.Add($"Saldot i Visma har ändrats under inventeringen ({Fmt(snap)} → {Fmt(current)})");
 
                 return new ArticleSummary(
                     g.Key,
@@ -76,6 +78,8 @@ public static class InventoryAggregator
             .OrderBy(a => a.ArticleNo, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
+
+    private static string Fmt(decimal d) => d.ToString("#,0.###", System.Globalization.CultureInfo.GetCultureInfo("sv-SE"));
 
     /// <summary>Lagerförda artiklar med saldo som inte räknats alls i inventeringen.</summary>
     public static IReadOnlyList<Article> Uncounted(IEnumerable<CountLine> lines, IEnumerable<Article> articles)

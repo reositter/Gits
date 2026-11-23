@@ -100,6 +100,7 @@ public sealed class AdkBridgeGateway(AdkBridgeRunner runner, string companyPath,
         {
             ArticleNo = a.ArticleNo, Name = a.Name ?? "", Ean = a.Ean, Unit = a.Unit,
             StockQuantity = (decimal)a.StockQuantity,
+            PurchasePrice = a.PurchasePrice is { } p ? (decimal)p : null,
             // Inaktiva artiklar behandlas som ej inventeringsbara.
             IsStockItem = a.IsStockItem && !a.Inactive,
         }).ToList();
@@ -114,7 +115,7 @@ public sealed class AdkBridgeGateway(AdkBridgeRunner runner, string companyPath,
         return res.Select(r => new InventoryWriteResult(r.ArticleNo, r.Success, r.StockBefore is { } d ? (decimal)d : null, r.Message)).ToList();
     }
 
-    private sealed record ArticleDto(string ArticleNo, string? Name, string? Ean, string? Unit, double StockQuantity, bool IsStockItem, bool Inactive);
+    private sealed record ArticleDto(string ArticleNo, string? Name, string? Ean, string? Unit, double StockQuantity, bool IsStockItem, bool Inactive, double? PurchasePrice = null);
     private sealed record WriteResultDto(string ArticleNo, bool Success, double? StockBefore, string? Message);
     private sealed record StatusDto(string? CompanyName, string? AdkVersion, string? Product, bool HasInventory, int InventoryListRows, DateTime? InventoryListDate);
 }

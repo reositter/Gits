@@ -12,6 +12,7 @@ till Visma Administration via ADK. Bakgrund och designbeslut finns i [docs/ARKIT
 | Flera mobiler samtidigt, summering per artikel, varningar | Klar |
 | Admin: starta/låsa/granska/stryka rader/korrigera/skicka, CSV-export | Klar |
 | Inloggning, roller, kontospärr, TOTP-tvåfaktor, händelselogg | Klar |
+| Rapporter: utskriftsvänlig HTML/PDF och Excel (sammanfattning, artiklar, inlämningar, alla rader) | Klar |
 | Flera bolag (FTG1, FTG2 …) med egna namn, bolagsval vid inloggning, behörighet per användare | Klar |
 | Streckkodsregler per kund (regex, GS1-128/DataMatrix) och extra streckkoder (t.ex. kartong = 12 st) | Klar |
 | Signerad inlämning per användare, kontrollsumma, spårbarhet på radnivå | Klar |
@@ -111,6 +112,20 @@ Utan HTTPS fungerar sökfältet och handskannrar i tangentbordsläge, men inte k
 
 Lägg in en länk eller integrationspost, enligt befintligt upplägg med `dynamic.xml`, som öppnar
 `https://inventering.foretaget.se/admin.html` i webbläsaren.
+
+## Rapporter
+
+På inventeringens sida finns knapparna **📄 Rapport** och **📊 Excel**.
+
+- **Rapport (HTML)** är byggd för utskrift (A4 liggande). Den har bolag, status och datum, nyckeltal
+  (differens i antal och kronor, räknat lagervärde), alla räknade artiklar med saldo vid start,
+  räknat antal, differens, inpris och värde, ej räknade artiklar, inlämningar med kontrollsumma och
+  en rad för underskrift. "Skriv ut / spara som PDF" ger en PDF. Den kan också visa bara differenser.
+- **Excel (.xlsx)** har flikarna Sammanfattning, Artiklar (tabell med filter och summarad), Ej räknade,
+  Inlämningar och Alla rader. Den sista ger full spårbarhet: vem, enhet, tid, skannad kod och
+  inlämning för varje rad.
+
+Inpriset är Vismas beräknade inpris (`EstimatedPurchasePrice`), sparat när inventeringen startades.
 
 ## Flera bolag
 
