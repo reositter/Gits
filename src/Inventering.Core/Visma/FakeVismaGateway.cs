@@ -42,7 +42,8 @@ public class FakeVismaGateway : IVismaGateway
     public string Name => "Fake (test)";
 
     public Task<VismaStatus> GetStatusAsync(CancellationToken ct = default) =>
-        Task.FromResult(new VismaStatus(Name, "Testdata – inget skrivs till Visma", false, null, null));
+        // Simulerar Visma med ett inventeringsunderlag som omfattar alla artiklar.
+        Task.FromResult(new VismaStatus(Name, "Testläge – simulerad Visma Administration", true, _articles.Count, DateTime.Today));
 
     public IReadOnlyCollection<Article> Current => _articles.Values.ToList();
 

@@ -10,7 +10,7 @@
 importScripts('/lib/xlsx.full.min.js');
 
 const STATE_KEY = '/__demo_state__';
-const VERSION = 3;
+const VERSION = 4;
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
@@ -341,7 +341,7 @@ async function route(req, url) {
     const out = [];
     for (const x of state.submissions.filter((y) => y.sessionId === s.id)) {
       const ls = state.lines.filter((l) => l.submissionId === x.id);
-      out.push({ ...x, user: uname(x.userId), intact: (await hashSubmission(x, ls)) === x.hash && ls.length === x.lineCount, voidedLines: ls.filter((l) => l.isVoided).length });
+      out.push({ ...x, user: display(x.userId), intact: (await hashSubmission(x, ls)) === x.hash && ls.length === x.lineCount, voidedLines: ls.filter((l) => l.isVoided).length });
     }
     return json(out);
   }
@@ -398,6 +398,100 @@ async function route(req, url) {
     state.lines.filter((l) => l.sessionId === s.id).forEach((l) => rows.push([l.id, l.articleNo, art(cid, l.articleNo)?.name ?? '', String(l.quantity).replace('.', ','), l.location ?? '', l.countedAt, uname(l.userId), l.submissionId ?? 'UTKAST', l.isVoided ? 'Ja' : '']));
     const csv = '\ufeff' + rows.map((x) => x.map((v) => /[;"\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : v).join(';')).join('\r\n');
     return new Response(csv, { headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="inventering-${s.id}-rader.csv"` } });
+  }
+
+  // ---- Excel: inventeringslista och inläsning ----
+  if (match('GET', /^\/api\/admin\/sessions\/(\d+)\/countsheet\.xlsx$/)) {
+    const s = sessionById(r[1]); if (!s) return err('', 404);
+    const withStock = q.get('includeStock') === 'true';
+    let list = arts(cid).filter((a) => a.isStockItem);
+    if (q.get('onlyUncounted') === 'true') {
+      const counted = new Set(state.lines.filter((l) => l.sessionId === s.id && l.submissionId && !l.isVoided).map((l) => l.articleNo.toLowerCase()));
+      list = list.filter((a) => !counted.has(a.articleNo.toLowerCase()));
+    }
+    const head = ['Artikelnr', 'Benämning', 'Enhet', 'EAN', ...(withStock ? ['Saldo i Visma'] : []), 'Plats', 'Räknat antal', 'Kommentar'];
+    const rows = [['Inventeringslista'], [company.name], [`#${s.id} ${s.name}`], ['Räknat av:', ''],
+      ['Fyll i räknat antal. Tomma rader läses inte in. Ändra inte artikelnummer eller kolumnrubriker.'], [], head,
+      ...list.map((a) => [a.articleNo, a.name, a.unit ?? '', a.ean ?? '', ...(withStock ? [a.stockQuantity] : []), '', '', ''])];
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws['!cols'] = head.map((h) => ({ wch: h === 'Benämning' ? 40 : h === 'Kommentar' ? 28 : 14 }));
+    XLSX.utils.book_append_sheet(wb, ws, 'Inventering');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['sessionId', s.id], ['companyId', cid], ['format', 1]]), '_inventering');
+    wb.Workbook = { Sheets: [{ Hidden: 0 }, { Hidden: 2 }] };
+    return new Response(XLSX.write(wb, { type: 'array', bookType: 'xlsx' }), { headers: {
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="Inventeringslista-${s.id}.xlsx"` } });
+  }
+  if (match('POST', /^\/api\/admin\/sessions\/(\d+)\/import$/)) {
+    const s = sessionById(r[1]); if (!s) return err('', 404);
+    if (s.status !== 'Open' && s.status !== 'Locked') return err('Inventeringen är avslutad – inget kan läsas in.', 409);
+    const form = await req.formData();
+    const file = form.get('file');
+    if (!file || !file.size) return err('Ingen fil.');
+    const buf = await file.arrayBuffer();
+    const fileHash = await sha256(String.fromCharCode(...new Uint8Array(await crypto.subtle.digest('SHA-256', buf))));
+    let wb; try { wb = XLSX.read(buf, { type: 'array' }); } catch { return err('Filen kunde inte läsas som Excel (.xlsx).'); }
+    const meta = wb.Sheets._inventering ? XLSX.utils.sheet_to_json(wb.Sheets._inventering, { header: 1 }) : null;
+    const metaVal = (k) => meta?.find((x) => x[0] === k)?.[1];
+    if (metaVal('companyId') != null && Number(metaVal('companyId')) !== cid) return err('Filen är skapad för ett annat bolag.');
+    let parsed = null;
+    for (const name of wb.SheetNames.filter((n) => n !== '_inventering')) {
+      const grid = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, defval: '' });
+      for (let hr = 0; hr < Math.min(grid.length, 30); hr++) {
+        const cols = {};
+        grid[hr].forEach((h, c) => {
+          h = String(h).trim().toLowerCase();
+          if (['artikelnr', 'artikelnummer', 'art.nr', 'artnr'].includes(h)) cols.art ??= c;
+          else if (['räknat antal', 'räknat', 'antal', 'inventerat antal'].includes(h)) cols.qty ??= c;
+          else if (['plats', 'lagerplats', 'hylla'].includes(h)) cols.loc ??= c;
+          else if (['kommentar', 'anmärkning'].includes(h)) cols.comment ??= c;
+        });
+        if (cols.art == null || cols.qty == null) continue;
+        let countedBy = null;
+        for (let i = 0; i < hr; i++) if (String(grid[i][0]).trim().toLowerCase().startsWith('räknat av')) countedBy = String(grid[i][1] ?? '').trim() || null;
+        const rows = [];
+        for (let i = hr + 1; i < grid.length; i++) {
+          const raw = grid[i][cols.qty];
+          if (raw === '' || raw == null) continue;
+          const no = String(grid[i][cols.art] ?? '').trim();
+          const qty = typeof raw === 'number' ? raw : Number(String(raw).replace(/\s/g, '').replace(',', '.'));
+          const a = no ? art(cid, no) : null;
+          const error = !Number.isFinite(qty) ? `Antalet "${raw}" är inte ett tal` : qty < 0 ? 'Negativt antal'
+            : !no ? 'Artikelnummer saknas' : !a ? `Artikel ${no} finns inte i bolaget` : null;
+          rows.push({ row: i + 1, articleNo: a?.articleNo ?? no, name: a?.name ?? null, quantity: Number.isFinite(qty) ? qty : 0,
+            location: cols.loc != null ? String(grid[i][cols.loc] ?? '').trim() || null : null,
+            comment: cols.comment != null ? String(grid[i][cols.comment] ?? '').trim() || null : null, error });
+        }
+        parsed = { rows, countedBy };
+        break;
+      }
+      if (parsed) break;
+    }
+    if (!parsed) return err('Hittade ingen flik med kolumnerna "Artikelnr" och "Räknat antal".');
+    const warnings = [];
+    if (metaVal('sessionId') != null && Number(metaVal('sessionId')) !== s.id) warnings.push(`Filen skapades för inventering #${metaVal('sessionId')}, men läses in i #${s.id}.`);
+    if (!meta) warnings.push('Filen är inte skapad från systemet – kolumnerna tolkades automatiskt.');
+    const countedBy = (form.get('countedBy') || parsed.countedBy || '').trim() || null;
+    if (!countedBy) warnings.push('"Räknat av" är inte ifyllt i filen.');
+    if (!parsed.rows.length) warnings.push('Inga ifyllda rader hittades – kolumnen "Räknat antal" är tom.');
+    const dup = state.submissions.find((x) => x.sessionId === s.id && x.sourceHash === fileHash);
+    if (dup) warnings.push(`Exakt samma fil lästes redan in (inlämning #${dup.id}).`);
+    const valid = parsed.rows.filter((x) => !x.error);
+    if (q.get('commit') === 'true') {
+      if (dup && q.get('allowDuplicate') !== 'true') return err(`Filen är redan inläst (inlämning #${dup.id}).`, 409);
+      if (!valid.length) return err('Inga giltiga rader att läsa in.');
+      const at = now();
+      const lines = valid.map((x) => ({ id: uuid(), sessionId: s.id, userId: user.id, articleNo: x.articleNo, quantity: x.quantity, location: x.location, comment: x.comment,
+        scannedCode: null, scanVia: `Excel-import rad ${x.row}`, countedAt: at, deviceId: 'Excel: ' + file.name, submissionId: null, isVoided: false }));
+      state.lines.push(...lines);
+      const sub = await createSubmission(s.id, user.id, lines, 'excel-import', `Excel: ${file.name}${countedBy ? ' – räknat av ' + countedBy : ''}`);
+      Object.assign(sub, { sourceFile: file.name, sourceHash: fileHash, countedByName: countedBy });
+      return json({ submissionId: sub.id, imported: lines.length, skipped: parsed.rows.length - valid.length });
+    }
+    return json({ fileName: file.name, countedBy, valid: valid.length, invalid: parsed.rows.length - valid.length,
+      total: valid.reduce((n, x) => n + x.quantity, 0), articles: new Set(valid.map((x) => x.articleNo.toLowerCase())).size,
+      duplicate: !!dup, warnings, rows: parsed.rows });
   }
 
   // ---- streckkoder ----
@@ -558,7 +652,7 @@ function summarize(s) {
     const cur = compare ? a?.stockQuantity ?? sq : sq;
     if (cur !== sq) warnings.push(`Saldot i Visma har ändrats under inventeringen (${sv(sq)} → ${sv(cur)})`);
     return { articleNo: no, name: a?.name ?? '', ean: a?.ean, unit: a?.unit, snapshotQuantity: sq, currentStock: cur, countedQuantity: counted,
-      difference: counted - sq, lineCount: g.length, countedBy: [...new Set(g.map((l) => display(l.userId)))], warnings, price: snap[no]?.p ?? a?.purchasePrice ?? null };
+      difference: counted - sq, lineCount: g.length, countedBy: [...new Set(g.map((l) => state.submissions.find((x) => x.id === l.submissionId)?.countedByName ?? display(l.userId)))], warnings, price: snap[no]?.p ?? a?.purchasePrice ?? null };
   }).sort((a, b) => a.articleNo.localeCompare(b.articleNo, 'sv'));
   const countedSet = new Set(articles.map((a) => a.articleNo.toLowerCase()));
   const uncounted = arts(cid).filter((a) => a.isStockItem && a.stockQuantity !== 0 && !countedSet.has(a.articleNo.toLowerCase()));
@@ -655,7 +749,7 @@ async function reportModel(s, company, user) {
   const subsOut = [];
   for (const x of subs) {
     const ls = lines.filter((l) => l.submissionId === x.id);
-    subsOut.push({ ...x, user: display(x.userId), signed: x.signedWith === 'password' ? 'Lösenord' : 'Admin-korrigering', intact: (await hashSubmission(x, ls)) === x.hash && ls.length === x.lineCount });
+    subsOut.push({ ...x, user: x.countedByName ?? display(x.userId), signed: { password: 'Lösenord', 'excel-import': 'Excel-import' }[x.signedWith] ?? 'Admin-korrigering', intact: (await hashSubmission(x, ls)) === x.hash && ls.length === x.lineCount });
   }
   const articles = sum.articles.map((a) => {
     const res = results.filter((x) => ci(x.articleNo, a.articleNo)).pop();
@@ -699,7 +793,7 @@ async function reportHtml(m, onlyDiff) {
 <div><span class="pos">${SG(m.plus)}</span>övertal (antal)</div><div><span class="neg">${N(m.minus)}</span>undertal (antal)</div>
 <div><span class="${CL(m.net)}">${KR(m.net)}</span>nettodifferens i värde</div><div><span>${KR(m.countedValue)}</span>räknat lagervärde</div>
 <div><span>${m.subs.length}</span>inlämningar</div><div><span>${m.uncounted.length}</span>ej räknade med saldo</div></section>
-${m.drafts ? `<p class="warn">⚠ ${m.drafts} rader är inte inlämnade och ingår inte i rapporten.</p>` : ''}
+${m.drafts ? `<p class="warn">${m.drafts === 1 ? '1 rad är inte inlämnad och ingår' : m.drafts + ' rader är inte inlämnade och ingår'} inte i rapporten.</p>` : ''}
 ${s.status === 'Sent' ? `<p class="ok">Skickat till Vismas inventeringsunderlag: ${m.sendOk} artiklar OK.</p>` : ''}
 <h2>${onlyDiff ? 'Artiklar med differens' : 'Räknade artiklar'} (${rows.length})</h2>
 <table class="data"><thead><tr><th>Artikelnr</th><th>Benämning</th><th>Enhet</th><th class="n">Saldo vid start</th><th class="n">Räknat</th><th class="n">Differens</th><th class="n">Inpris</th><th class="n">Värde diff.</th><th>Räknat av</th><th>Anm.</th></tr></thead><tbody>
@@ -709,7 +803,7 @@ ${rows.map((a) => `<tr><td>${E(a.articleNo)}</td><td>${E(a.name)}</td><td>${E(a.
 ${m.uncounted.length && !onlyDiff ? `<h2>Lagerartiklar med saldo som inte räknats (${m.uncounted.length})</h2><table class="data"><thead><tr><th>Artikelnr</th><th>Benämning</th><th>Enhet</th><th class="n">Saldo</th><th class="n">Inpris</th><th class="n">Värde</th></tr></thead><tbody>
 ${m.uncounted.map((u) => `<tr><td>${E(u.articleNo)}</td><td>${E(u.name)}</td><td>${E(u.unit)}</td><td class="n">${N(u.stockQuantity)}</td><td class="n">${KR(u.purchasePrice)}</td><td class="n">${KR(u.value)}</td></tr>`).join('')}</tbody></table>` : ''}
 <h2>Inlämningar (signerade av räknarna)</h2><table class="data"><thead><tr><th>#</th><th>Räknare</th><th>Inlämnad</th><th class="n">Rader</th><th class="n">Totalt antal</th><th>Signerad med</th><th>Kontrollsumma</th><th>Kommentar</th></tr></thead><tbody>
-${m.subs.map((x) => `<tr><td>${x.id}</td><td>${E(x.user)}</td><td>${T(x.submittedAt)}</td><td class="n">${x.lineCount}</td><td class="n">${N(x.totalQuantity)}</td><td>${E(x.signed)}</td><td>${x.intact ? '✔ Intakt' : '<span class="neg">⚠ Ändrad</span>'} <code>${E(x.hash.slice(0, 12))}</code></td><td>${E(x.comment)}</td></tr>`).join('') || '<tr><td colspan="8">Inga inlämningar.</td></tr>'}
+${m.subs.map((x) => `<tr><td>${x.id}</td><td>${E(x.user)}</td><td>${T(x.submittedAt)}</td><td class="n">${x.lineCount}</td><td class="n">${N(x.totalQuantity)}</td><td>${E(x.signed)}</td><td>${x.intact ? '<span class="ok">Intakt</span>' : '<span class="neg">Ändrad efter signering</span>'} <code>${E(x.hash.slice(0, 12))}</code></td><td>${E(x.comment)}</td></tr>`).join('') || '<tr><td colspan="8">Inga inlämningar.</td></tr>'}
 </tbody></table>
 <section class="sign"><div><div class="line"></div>Inventeringsansvarig – namnförtydligande</div><div><div class="line"></div>Underskrift</div><div><div class="line"></div>Datum</div></section>
 <footer>${E(m.company.name)} · Inventering #${s.id} · ${E(m.company.companyPath)} · Utskriven ${T(m.generatedAt)} · DEMO</footer></body></html>`;
