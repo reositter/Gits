@@ -167,6 +167,26 @@ function New-Installningar($Befintliga, [string]$Data, [int]$HttpPort, [int]$Htt
     return $s
 }
 
+function Test-NetFramework48 {
+    $rel = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full' -ErrorAction SilentlyContinue).Release
+    return ($rel -ge 528040)
+}
+
+# Kör ADK-bryggan och listar bolagen som Visma känner till. Returnerar $null om ADK inte fungerar.
+function Get-VismaBolag([string]$Brygga) {
+    if (-not (Test-Path $Brygga)) { return $null }
+    $psi = New-Object System.Diagnostics.ProcessStartInfo $Brygga
+    $psi.RedirectStandardInput = $true; $psi.RedirectStandardOutput = $true; $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true
+    $psi.StandardOutputEncoding = [System.Text.Encoding]::UTF8
+    $p = [System.Diagnostics.Process]::Start($psi)
+    $p.StandardInput.Write('{"command":"companies"}'); $p.StandardInput.Close()
+    $ut = $p.StandardOutput.ReadToEnd()
+    if (-not $p.WaitForExit(60000)) { $p.Kill(); return $null }
+    $svar = $ut | ConvertFrom-Json
+    if ($p.ExitCode -ne 0) { Write-Warning "Visma-kopplingen svarade med fel: $($svar.error)"; return $null }
+    return @($svar)
+}
+
 function Wait-Tjanst([int]$HttpPort) {
     for ($i = 0; $i -lt 30; $i++) {
         try {
@@ -297,8 +317,13 @@ function Invoke-Installation {
         $kalla = Join-Path $PSScriptRoot 'app'
         if (-not (Test-Path (Join-Path $kalla 'Inventering.Web.exe'))) { throw "Hittar inte programfilerna i $kalla. Kör skriptet från paketmappen." }
         # /MIR speglar mappen men behåller inställningsfilen.
-        robocopy $kalla $Installationsmapp /MIR /XF appsettings.Production.json /NFL /NDL /NJH /NJS /NP | Out-Null
+        robocopy $kalla $Installationsmapp /MIR /XF appsettings.Production.json installera.ps1 'Byt certifikat.cmd' /NFL /NDL /NJH /NJS /NP | Out-Null
         if ($LASTEXITCODE -ge 8) { throw "Kopieringen misslyckades (robocopy $LASTEXITCODE)." }
+        # Skripten följer med till installationsmappen så att certifikatet kan bytas senare.
+        foreach ($f in 'installera.ps1', 'Byt certifikat.cmd') {
+            $k = Join-Path $PSScriptRoot $f
+            if ((Test-Path $k) -and ((Resolve-Path $k).Path -ne (Join-Path $Installationsmapp $f))) { Copy-Item $k $Installationsmapp -Force }
+        }
         Write-Host "  Kopierat till $Installationsmapp"
 
         $brygga = Join-Path $Installationsmapp 'AdkBridge'
@@ -309,6 +334,38 @@ function Invoke-Installation {
                 $k = Join-Path $adk $f
                 if (-not (Test-Path $k)) { throw "Hittar inte $k." }
                 Copy-Item $k $brygga -Force
+            }
+        }
+    }
+
+    # ---- Förutsättningar och Visma ----
+    if (-not $BaraCertifikat) {
+        Write-Rubrik 'Visma-kopplingen'
+        if (-not (Test-NetFramework48)) {
+            Write-Warning '.NET Framework 4.8 saknas. Det behövs för Visma-kopplingen (ADK). Installera det från Microsoft och kör skriptet igen.'
+        } else {
+            $bolag = Get-VismaBolag (Join-Path $Installationsmapp 'AdkBridge\Inventering.AdkBridge.exe')
+            if ($null -eq $bolag) {
+                Write-Warning 'Kunde inte nå Visma via ADK. Kontrollera att Visma Administration är installerat på servern. Bolag kan läggas till i admin senare.'
+            } elseif ($bolag.Count -eq 0) {
+                Write-Host 'Visma svarar, men inga företag hittades.'
+            } else {
+                Write-Host "Visma svarar. Hittade $($bolag.Count) företag:" -ForegroundColor Green
+                $importFil = Join-Path $Datamapp 'bolag-att-importera.json'
+                $valda = @()
+                foreach ($b in $bolag) {
+                    Write-Host ''
+                    Write-Host ("  {0}  ({1})" -f $b.name, $b.directoryFullPath)
+                    if (Read-JaNej '  Ta med bolaget?' $true) {
+                        $namn = Read-Svar '  Namn som användarna ser' $b.name
+                        $valda += [ordered]@{ Name = $namn; CompanyPath = $b.directoryFullPath; VismaName = $b.name }
+                    }
+                }
+                if ($valda.Count) {
+                    # Läses in av tjänsten vid start om inga bolag finns ännu.
+                    [System.IO.File]::WriteAllText($importFil, (ConvertTo-Json @($valda) -Depth 5), (New-Object System.Text.UTF8Encoding($false)))
+                    Write-Host "  $($valda.Count) bolag läggs upp när tjänsten startar."
+                }
             }
         }
     }
@@ -355,8 +412,18 @@ function Invoke-Installation {
         Write-Host '                Öppna den sidan på varje telefon (eller skanna QR-koden från en dator) och följ stegen.'
     }
     $forsta = Join-Path $Datamapp 'forsta-admin-losenord.txt'
-    if (Test-Path $forsta) { Write-Host "Första inloggning: användare admin, lösenordet finns i $forsta" }
-    Write-Host 'Lägg till bolag under Administration → Bolag → Sök bolag i Visma.'
+    if (Test-Path $forsta) {
+        $losen = (Get-Content $forsta -Encoding UTF8 | Where-Object { $_ -like 'Lösenord:*' }) -replace '^Lösenord:\s*', ''
+        Write-Host ''
+        Write-Host "Första inloggning: användare admin, lösenord $losen" -ForegroundColor Yellow
+        Write-Host "Byt lösenordet efter inloggningen och radera filen $forsta."
+    }
+    if (-not (Test-Path (Join-Path $Datamapp 'bolag-att-importera.json.importerad'))) {
+        Write-Host 'Lägg till bolag under Administration → Bolag → Sök bolag i Visma.'
+    }
+    Write-Host ''
+    Write-Host "Certifikatet kan bytas senare under Administration → Server, eller med 'Byt certifikat.cmd' i $Installationsmapp."
+    if ($ok -and (Read-JaNej 'Öppna administrationen i webbläsaren nu?' $true)) { Start-Process "$bas/admin.html" }
 }
 
 if (-not $env:INVENTERING_SKRIPTTEST) { Invoke-Installation }

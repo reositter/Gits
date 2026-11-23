@@ -52,7 +52,7 @@ namespace Inventering.Web.Data.Migrations
 
                     b.HasIndex("CompanyId", "Ean");
 
-                    b.ToTable("Articles", (string)null);
+                    b.ToTable("Articles");
                 });
 
             modelBuilder.Entity("Inventering.Core.Domain.AuditEntry", b =>
@@ -82,7 +82,7 @@ namespace Inventering.Web.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Audit", (string)null);
+                    b.ToTable("Audit");
                 });
 
             modelBuilder.Entity("Inventering.Core.Domain.BarcodeAlias", b =>
@@ -107,7 +107,7 @@ namespace Inventering.Web.Data.Migrations
 
                     b.HasIndex("CompanyId", "ArticleNo");
 
-                    b.ToTable("BarcodeAliases", (string)null);
+                    b.ToTable("BarcodeAliases");
                 });
 
             modelBuilder.Entity("Inventering.Core.Domain.BarcodeRule", b =>
@@ -147,7 +147,7 @@ namespace Inventering.Web.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("BarcodeRules", (string)null);
+                    b.ToTable("BarcodeRules");
                 });
 
             modelBuilder.Entity("Inventering.Core.Domain.Company", b =>
@@ -187,7 +187,7 @@ namespace Inventering.Web.Data.Migrations
                     b.HasIndex("CompanyPath")
                         .IsUnique();
 
-                    b.ToTable("Companies", (string)null);
+                    b.ToTable("Companies");
                 });
 
             modelBuilder.Entity("Inventering.Core.Domain.CountLine", b =>
@@ -247,7 +247,7 @@ namespace Inventering.Web.Data.Migrations
 
                     b.HasIndex("SessionId", "ArticleNo");
 
-                    b.ToTable("Lines", (string)null);
+                    b.ToTable("Lines");
                 });
 
             modelBuilder.Entity("Inventering.Core.Domain.InventorySession", b =>
@@ -285,7 +285,7 @@ namespace Inventering.Web.Data.Migrations
 
                     b.HasIndex("CompanyId", "Status");
 
-                    b.ToTable("Sessions", (string)null);
+                    b.ToTable("Sessions");
                 });
 
             modelBuilder.Entity("Inventering.Core.Domain.SendResult", b =>
@@ -323,7 +323,7 @@ namespace Inventering.Web.Data.Migrations
 
                     b.HasIndex("SessionId");
 
-                    b.ToTable("SendResults", (string)null);
+                    b.ToTable("SendResults");
                 });
 
             modelBuilder.Entity("Inventering.Core.Domain.StockSnapshot", b =>
@@ -342,7 +342,7 @@ namespace Inventering.Web.Data.Migrations
 
                     b.HasKey("SessionId", "ArticleNo");
 
-                    b.ToTable("Snapshots", (string)null);
+                    b.ToTable("Snapshots");
                 });
 
             modelBuilder.Entity("Inventering.Core.Domain.Submission", b =>
@@ -396,7 +396,7 @@ namespace Inventering.Web.Data.Migrations
 
                     b.HasIndex("SessionId", "UserId");
 
-                    b.ToTable("Submissions", (string)null);
+                    b.ToTable("Submissions");
                 });
 
             modelBuilder.Entity("Inventering.Core.Domain.User", b =>
@@ -428,6 +428,9 @@ namespace Inventering.Web.Data.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("RequireTotp")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int>("Role")
                         .HasColumnType("INTEGER");
 
@@ -444,7 +447,7 @@ namespace Inventering.Web.Data.Migrations
                     b.HasIndex("UserName")
                         .IsUnique();
 
-                    b.ToTable("Users", (string)null);
+                    b.ToTable("Users");
                 });
 
             modelBuilder.Entity("Inventering.Core.Domain.UserCompany", b =>
@@ -457,7 +460,7 @@ namespace Inventering.Web.Data.Migrations
 
                     b.HasKey("UserId", "CompanyId");
 
-                    b.ToTable("UserCompanies", (string)null);
+                    b.ToTable("UserCompanies");
                 });
 
             modelBuilder.Entity("Inventering.Core.Domain.CountLine", b =>

@@ -10,6 +10,8 @@ public static class Claims
 {
     public const string Mfa = "mfa";
     public const string Company = "company";
+    /// <summary>Användaren måste logga in med tvåfaktor (per användare, satt av admin).</summary>
+    public const string TotpRequired = "totpreq";
     /// <summary>Valt bolag (sätts när användaren väljer bolag efter inloggning).</summary>
     public static int? CompanyId(this ClaimsPrincipal p) =>
         int.TryParse(p.FindFirstValue(Company), out var id) ? id : null;

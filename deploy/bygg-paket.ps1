@@ -25,4 +25,6 @@ if ((Test-Path (Join-Path $lib 'AvSynkLib.dll')) -and (Test-Path (Join-Path $lib
 $skript = Get-Content (Join-Path $PSScriptRoot 'installera.ps1') -Raw -Encoding UTF8
 [System.IO.File]::WriteAllText((Join-Path $Ut 'installera.ps1'), $skript, (New-Object System.Text.UTF8Encoding($true)))
 Copy-Item (Join-Path $PSScriptRoot 'LÄS MIG.txt') $Ut
+Copy-Item (Join-Path $PSScriptRoot 'Installera.cmd') $Ut
+Copy-Item (Join-Path $PSScriptRoot 'Byt certifikat.cmd') $Ut
 Write-Host "Paketet finns i $Ut" -ForegroundColor Green

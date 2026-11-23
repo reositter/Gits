@@ -24,21 +24,17 @@ var dataDir = builder.Configuration["DataDirectory"] is { Length: > 0 } d
         ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Inventering")
         : Path.Combine(AppContext.BaseDirectory, "data");
 Directory.CreateDirectory(dataDir);
+// Certifikatval gjort i admin (Server → Ladda upp certifikat) sparas här och går före appsettings.
+builder.Configuration.AddJsonFile(Path.Combine(dataDir, ServerCertificateProvider.OverrideFile), optional: true, reloadOnChange: true);
 
 builder.Services.Configure<SecurityOptions>(builder.Configuration.GetSection("Security"));
 builder.Services.Configure<HttpsOptions>(builder.Configuration.GetSection("Https"));
-// Servercertifikatet hämtas ur Windows certifikatarkiv (se installera.ps1). Endpointen "Https" i
-// Kestrel-konfigurationen behöver då bara en Url.
-var httpsCfg = builder.Configuration.GetSection("Https").Get<HttpsOptions>() ?? new HttpsOptions();
-if (httpsCfg.Enabled && OperatingSystem.IsWindows() && (!string.IsNullOrWhiteSpace(httpsCfg.Thumbprint) || !string.IsNullOrWhiteSpace(httpsCfg.Subject)))
-{
-    builder.WebHost.ConfigureKestrel(k => k.ConfigureHttpsDefaults(h =>
-    {
-        using var lf = LoggerFactory.Create(l => l.AddConsole());
-        var cert = HttpsSetup.FindServerCertificate(httpsCfg, lf.CreateLogger("Https"));
-        if (cert != null) h.ServerCertificate = cert;
-    }));
-}
+// Servercertifikatet hämtas ur Windows certifikatarkiv (se installera.ps1) och kan bytas i admin
+// utan omstart. Endpointen "Https" i Kestrel-konfigurationen behöver bara en Url.
+var certProvider = new ServerCertificateProvider();
+builder.Services.AddSingleton(certProvider);
+if (OperatingSystem.IsWindows() && (builder.Configuration.GetSection("Https").Get<HttpsOptions>()?.Enabled ?? false))
+    builder.WebHost.ConfigureKestrel(k => k.ConfigureHttpsDefaults(h => h.ServerCertificateSelector = (_, _) => certProvider.Current));
 builder.Services.AddDbContext<AppDb>(o => o.UseSqlite($"Data Source={Path.Combine(dataDir, "inventory.db")}"));
 // Nycklar för cookies sparas på disk så att inloggningar överlever omstart av tjänsten.
 var dp = builder.Services.AddDataProtection().SetApplicationName("Inventering")
@@ -92,15 +88,18 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
     });
 
 builder.Services.AddAuthorizationBuilder()
+    // Tvåfaktor krävs globalt (alla/admin) eller per användare (claim från inloggningen).
     .AddPolicy(Policies.Counter, p => p.RequireAuthenticatedUser().RequireAssertion(ctx =>
     {
         var o = (ctx.Resource as HttpContext)?.RequestServices.GetRequiredService<IOptions<SecurityOptions>>().Value ?? new();
-        return !o.RequireTotpForAll || ctx.User.HasClaim(Claims.Mfa, "1");
+        var required = o.RequireTotpForAll || ctx.User.HasClaim(Claims.TotpRequired, "1");
+        return !required || ctx.User.HasClaim(Claims.Mfa, "1");
     }))
     .AddPolicy(Policies.Admin, p => p.RequireRole(nameof(UserRole.Admin)).RequireAssertion(ctx =>
     {
         var o = (ctx.Resource as HttpContext)?.RequestServices.GetRequiredService<IOptions<SecurityOptions>>().Value ?? new();
-        return !(o.RequireTotpForAdmin || o.RequireTotpForAll) || ctx.User.HasClaim(Claims.Mfa, "1");
+        var required = o.RequireTotpForAdmin || o.RequireTotpForAll || ctx.User.HasClaim(Claims.TotpRequired, "1");
+        return !required || ctx.User.HasClaim(Claims.Mfa, "1");
     }));
 
 builder.Services.AddRateLimiter(o =>
@@ -134,6 +133,28 @@ using (var scope = app.Services.CreateScope())
         app.Logger.LogWarning("Första admin-kontot skapat. Lösenordet finns i {File}", file);
     }
 
+    // Bolag som installationsskriptet hittade i Visma och användaren valde.
+    var importFile = Path.Combine(dataDir, "bolag-att-importera.json");
+    if (File.Exists(importFile))
+    {
+        try
+        {
+            var list = System.Text.Json.JsonSerializer.Deserialize<List<Company>>(File.ReadAllText(importFile),
+                new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? [];
+            var order = db.Companies.Select(c => (int?)c.SortOrder).Max() ?? 0;
+            foreach (var c in list.Where(c => !string.IsNullOrWhiteSpace(c.CompanyPath)))
+            {
+                if (db.Companies.Any(x => x.CompanyPath == c.CompanyPath)) continue;
+                db.Companies.Add(new Company { Name = string.IsNullOrWhiteSpace(c.Name) ? Path.GetFileName(c.CompanyPath) : c.Name.Trim(),
+                    CompanyPath = c.CompanyPath.Trim(), VismaName = c.VismaName, SortOrder = ++order });
+            }
+            db.SaveChanges();
+            File.Move(importFile, importFile + ".importerad", overwrite: true);
+            app.Logger.LogInformation("Bolag från installationen inlästa: {Count}", list.Count);
+        }
+        catch (Exception ex) { app.Logger.LogError(ex, "Kunde inte läsa {File}", importFile); }
+    }
+
     if (!db.Companies.Any())
     {
         // Första start: ta bolag från tidigare konfiguration (Visma:Adk:CompanyPath) eller skapa demobolag.
@@ -149,6 +170,7 @@ using (var scope = app.Services.CreateScope())
     }
 }
 await app.Services.GetRequiredService<BarcodeService>().ReloadAsync();
+certProvider.Start(app.Services);
 
 // ---- Säkerhetshuvuden ----
 app.Use(async (ctx, next) =>
@@ -195,6 +217,7 @@ app.MapCount();
 app.MapAdmin();
 app.MapAdminGlobal();
 app.MapExcel();
+app.MapServerAdmin(dataDir);
 app.MapBarcodeAdmin();
 
 app.Run();

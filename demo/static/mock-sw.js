@@ -183,7 +183,7 @@ async function route(req, url) {
     const cur = cs.find((c) => c.id === state.auth.companyId);
     return json({
       id: user.id, userName: user.userName, displayName: user.displayName, role: user.role,
-      totpEnabled: false, mfa: true, mustSetupTotp: false,
+      totpEnabled: false, totpRequired: !!user.requireTotp, mfa: true, mustSetupTotp: false,
       company: cur ? { id: cur.id, name: cur.name } : null, companies: cs.map((c) => ({ id: c.id, name: c.name })),
     });
   }
@@ -195,6 +195,7 @@ async function route(req, url) {
     log(user.id, c.id, 'company.selected', c.name);
     return json({ id: c.id, name: c.name });
   }
+  if (p.startsWith('/api/auth/totp/')) return err('Tvåfaktor kan inte provas i demon – i den riktiga tjänsten används en autentiseringsapp.');
   if (match('POST', /^\/api\/auth\/password$/)) {
     const b = await body(req);
     if (b.currentPassword !== user.password) return err('Nuvarande lösenord är fel.');
@@ -542,6 +543,12 @@ async function route(req, url) {
 }
 
 async function routeGlobal(req, url, user, match, rr) {
+  if (match('GET', /^\/api\/admin\/server$/))
+    return json({ mode: 'InternalCa', enabled: true, publicHost: 'inventering.lager.local', port: 443, httpsUrl: 'https://inventering.lager.local',
+      certificatePage: 'http://inventering.lager.local/certifikat.html', windows: true, canUpload: false, rootCa: true,
+      certificate: { subject: 'inventering.lager.local', issuer: 'Inventering rotcertifikat (VISMA01)', notBefore: ago(30), notAfter: ago(-795), daysLeft: 795,
+        thumbprint: '3F2A9C0D5E7B41A6C8D9E0F1A2B3C4D5E6F70812', names: ['inventering.lager.local', 'visma01', 'visma01.lager.local'] } });
+  if (match('POST', /^\/api\/admin\/server\/certificate$/)) return err('Certifikat kan inte bytas i demon.');
   if (match('GET', /^\/api\/admin\/companies$/))
     return json(state.companies.map((c) => ({ ...c, hasPassword: false, articles: arts(c.id).length, lastRefresh: state.articlesRefreshed[c.id] ?? null, lastError: null })));
   if (match('GET', /^\/api\/admin\/companies\/discover$/)) {
@@ -580,7 +587,7 @@ async function routeGlobal(req, url, user, match, rr) {
     return json({ status: { name: 'DEMO', details: 'Visma Administration 2000 (simulerat)', writesToInventoryList: true, inventoryListRows: arts(id).length }, articles: arts(id).length });
   }
   if (match('GET', /^\/api\/admin\/users$/))
-    return json(state.users.map((u) => ({ id: u.id, userName: u.userName, displayName: u.displayName, role: u.role, isActive: u.isActive, totpEnabled: false, locked: false, companyIds: u.companyIds })));
+    return json(state.users.map((u) => ({ id: u.id, userName: u.userName, displayName: u.displayName, role: u.role, isActive: u.isActive, totpEnabled: false, requireTotp: !!u.requireTotp, locked: false, companyIds: u.companyIds })));
   if (match('POST', /^\/api\/admin\/users$/)) {
     const b = await req.json();
     if (!b.userName?.trim()) return err('Ange användarnamn.');
@@ -600,6 +607,7 @@ async function routeGlobal(req, url, user, match, rr) {
     if (b.isActive != null) { if (self && !b.isActive) return err('Du kan inte inaktivera dig själv.'); u.isActive = b.isActive; }
     if (b.password) u.password = b.password;
     if (b.companyIds) u.companyIds = b.companyIds;
+    if (b.requireTotp != null) u.requireTotp = !!b.requireTotp;
     return ok();
   }
   if (match('POST', /^\/api\/admin\/users\/(\d+)\/reset-totp$/)) return ok();

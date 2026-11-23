@@ -1,13 +1,17 @@
 Inventering – installation på Visma-servern
 ==========================================
 
-1. Kopiera hela mappen till servern, t.ex. till C:\Temp\Inventering.
-2. Starta PowerShell som administratör och kör:
-
-     cd C:\Temp\Inventering
-     powershell -ExecutionPolicy Bypass -File .\installera.ps1
-
+1. Kopiera hela mappen till Visma-servern, t.ex. till C:\Temp\Inventering.
+2. Dubbelklicka på Installera.cmd och godkänn att den körs som administratör.
 3. Svara på frågorna. Tryck Enter för att välja förslaget.
+
+Installationen gör allt:
+  - kopierar programmet (inget annat behöver installeras – .NET följer med)
+  - kontrollerar .NET Framework 4.8 och att Visma (ADK) svarar
+  - listar företagen i Visma och låter dig välja vilka som ska med och vad de ska heta
+  - skapar certifikat enligt ditt val (se nedan)
+  - installerar och startar Windows-tjänsten "Inventering" och öppnar brandväggen för internt nät
+  - visar adresser och första admin-lösenordet och öppnar administrationen i webbläsaren
 
 Skriptet frågar hur https ska ordnas:
 
@@ -24,8 +28,12 @@ Skriptet frågar hur https ska ordnas:
 Uppdatera till en ny version: kör installera.ps1 från det nya paketet. Inställningar och
 data behålls, och databasen säkerhetskopieras automatiskt före uppdateringen.
 
-Byta certifikat i efterhand: .\installera.ps1 -BaraCertifikat
+Byta certifikat i efterhand:
+  - Ladda upp ett nytt .pfx under Administration → Server (gäller direkt, utan omstart), eller
+  - dubbelklicka på "Byt certifikat.cmd" i installationsmappen (C:\Inventering) för att
+    skapa nya interna certifikat eller byta https-läge.
+  IIS används inte – tjänsten har en egen webbserver.
 
 Servercertifikaten (alternativ 1 och 2) gäller i 825 dagar, vilket är det längsta iPhone
-godtar. Kör .\installera.ps1 -BaraCertifikat innan de går ut – rotcertifikatet återanvänds,
+godtar. Kör "Byt certifikat.cmd" innan de går ut (Administration → Server visar hur länge de gäller) – rotcertifikatet återanvänds,
 så telefonerna behöver inte installera något nytt.

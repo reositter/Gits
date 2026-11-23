@@ -23,6 +23,8 @@ public class User
     public bool IsActive { get; set; } = true;
     /// <summary>Base32 TOTP-hemlighet. Null = tvåfaktor ej aktiverad.</summary>
     public string? TotpSecret { get; set; }
+    /// <summary>Admin kräver tvåfaktor för just den här användaren.</summary>
+    public bool RequireTotp { get; set; }
     public long? LastTotpStep { get; set; }
     public int FailedLogins { get; set; }
     public DateTimeOffset? LockedUntil { get; set; }

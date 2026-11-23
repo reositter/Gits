@@ -171,3 +171,6 @@ body.m .m-iconbtn:hover:not(:disabled), body.m .m-company:hover:not(:disabled), 
 .m-cert a.m-btn { text-decoration: none; }
 .m-qr { margin-top: 28px; display: flex; gap: 16px; align-items: center; }
 .m-qr .qr { background: #fff; padding: 8px; border-radius: 10px; border: 1px solid var(--m-line); }
+
+.m-menu-val { margin-left: auto; color: var(--m-text-2); font-size: 15px; }
+body.m .login button.big.tcancel, body.m .login button.big.tcancel:hover:not(:disabled) { background: transparent; border-color: transparent; color: var(--m-text-2); margin-top: 4px !important; }

@@ -1,4 +1,4 @@
-import { $, api, esc, fmt, fmtTime, showMsg, ensureLoggedIn, logout, icon } from './common.js';
+import { $, api, esc, fmt, fmtTime, showMsg, ensureLoggedIn, logout, icon, totpSetup } from './common.js';
 
 const main = $('#main');
 const QUEUE_KEY = 'inv.queue';
@@ -128,6 +128,7 @@ function openMenu() {
     <ul class="m-menu" style="margin-top:12px">
       ${session ? `<li><button data-a="session">${icon('file', 20)}Byt inventering</button></li>` : ''}
       ${canSwitch ? `<li><button data-a="company">${icon('building', 20)}Byt bolag</button></li>` : ''}
+      <li><button data-a="totp">${icon('shield', 20)}Tvåfaktorsinloggning<span class="m-menu-val">${me.totpEnabled ? 'På' : 'Av'}</span></button></li>
       ${me.role === 'Admin' ? `<li><button data-a="admin">${icon('sheet', 20)}Administration</button></li>` : ''}
       <li><button data-a="logout" class="danger">${icon('logout', 20)}Logga ut</button></li>
     </ul>`);
@@ -137,7 +138,44 @@ function openMenu() {
     if (a === 'session') { stopScanner(); prefs.sessionId = null; savePrefs(); session = null; chooseSession(true); }
     if (a === 'company') $('#companyBtn').click();
     if (a === 'admin') location.href = '/admin.html';
+    if (a === 'totp') totpSheet();
     if (a === 'logout') logout();
+  });
+}
+
+function totpSheet() {
+  if (!me.totpEnabled) {
+    openSheet(`
+      <h2>Tvåfaktorsinloggning</h2>
+      <div class="m-sub">Skyddar kontot med en kod från en autentiseringsapp, t.ex. Microsoft Authenticator eller Google Authenticator, utöver lösenordet.</div>
+      <div class="m-actions"><button class="m-btn m-btn-primary" id="tOn">Slå på</button></div>`);
+    $('#tOn', sheet).onclick = async () => {
+      closeSheet(); stopScanner();
+      const done = await totpSetup(main, me, true);
+      if (done) toast('Tvåfaktor är påslagen.');
+      location.reload();
+    };
+    return;
+  }
+  openSheet(me.totpRequired ? `
+      <h2>Tvåfaktorsinloggning</h2>
+      <div class="m-sub">Påslagen. Administratören kräver tvåfaktor för ditt konto, så den kan inte stängas av.</div>
+      <div class="m-actions"><button class="m-btn m-btn-secondary" id="tOk">Stäng</button></div>` : `
+    <form id="tOff">
+      <h2>Stäng av tvåfaktor</h2>
+      <div class="m-sub">Bekräfta med lösenord och en kod från autentiseringsappen.</div>
+      <label for="tPw">Lösenord</label><input id="tPw" type="password" autocomplete="current-password" required>
+      <label for="tCode">Kod</label><input id="tCode" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required>
+      <div id="tMsg"></div>
+      <div class="m-actions"><button class="m-btn m-btn-danger">Stäng av tvåfaktor</button></div>
+    </form>`);
+  $('#tOk', sheet)?.addEventListener('click', closeSheet);
+  $('#tOff', sheet)?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      await api('POST', '/api/auth/totp/disable', { password: $('#tPw', sheet).value, code: $('#tCode', sheet).value });
+      me.totpEnabled = false; closeSheet(); toast('Tvåfaktor är avstängd.');
+    } catch (err) { showMsg($('#tMsg', sheet), err.message); }
   });
 }
 

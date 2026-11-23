@@ -146,7 +146,11 @@ function loginForm(main) {
   });
 }
 
-async function totpSetup(main, me) {
+/**
+ * Aktivera tvåfaktor. optional=true när användaren själv valt att slå på det (kan avbrytas).
+ * Resolvar true när den är aktiverad, false om användaren avbröt.
+ */
+export async function totpSetup(main, me, optional = false) {
   const s = await api('POST', '/api/auth/totp/setup');
   const qr = qrcode(0, 'M'); // från /lib/qrcode.js
   qr.addData(s.uri); qr.make();
@@ -154,20 +158,23 @@ async function totpSetup(main, me) {
     main.innerHTML = `
       <div class="login" style="max-width:460px"><form class="card" id="totp">
         <h2>Aktivera tvåfaktorsinloggning</h2>
-        <p>Kontot <b>${esc(me.userName)}</b> kräver tvåfaktor. Skanna koden med Microsoft Authenticator,
-        Google Authenticator eller liknande och ange sedan den sexsiffriga koden.</p>
+        <p>${optional ? 'Med tvåfaktor' : `Kontot <b>${esc(me.userName)}</b> kräver tvåfaktor. Med den`} behövs både lösenord och en kod från telefonen för att logga in.
+        Skanna koden med Microsoft Authenticator, Google Authenticator eller liknande och ange sedan den sexsiffriga koden.</p>
         <div class="qr">${qr.createImgTag(5, 8)}</div>
+        <p class="muted" style="margin-bottom:0"><a href="${esc(s.uri)}">Öppna i autentiseringsappen på den här enheten</a></p>
         <p class="muted">Kan du inte skanna? Ange nyckeln manuellt:<br><code>${esc(s.secret.replace(/(.{4})/g, '$1 ').trim())}</code></p>
         <label for="c">Kod</label>
         <input id="c" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required>
         <div id="tmsg"></div>
         <button class="primary big" style="margin-top:16px">Aktivera</button>
+        ${optional ? '<button type="button" class="big ghost tcancel" id="tcancel" style="margin-top:8px">Avbryt</button>' : ''}
       </form></div>`;
     const f = $('#totp', main);
     $('#c', f).focus();
+    $('#tcancel', f)?.addEventListener('click', () => resolve(false));
     f.addEventListener('submit', async (e) => {
       e.preventDefault();
-      try { await api('POST', '/api/auth/totp/confirm', { code: $('#c', f).value }); resolve(); }
+      try { await api('POST', '/api/auth/totp/confirm', { code: $('#c', f).value }); resolve(true); }
       catch (err) { showMsg($('#tmsg', f), err.message); }
     });
   });

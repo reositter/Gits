@@ -67,6 +67,22 @@ public class MigrationTests : IDisposable
         Assert.Equal(1L, (long)cmd.ExecuteScalar()!);
     }
 
+    [Fact]
+    public void Companies_from_installer_are_imported_once()
+    {
+        Directory.CreateDirectory(_dataDir);
+        File.WriteAllText(Path.Combine(_dataDir, "bolag-att-importera.json"),
+            "[{\"Name\":\"Bygg AB – Lager\",\"CompanyPath\":\"C:\\\\Ftg\\\\FTG7\",\"VismaName\":\"Bygg AB\"}]");
+        using var f = new WebApplicationFactory<Program>().WithWebHostBuilder(b => { b.UseSetting("DataDirectory", _dataDir); b.UseSetting("Visma:Mode", "Adk"); });
+        f.Server.ToString();
+        using var scope = f.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDb>();
+        var c = Assert.Single(db.Companies.ToList());
+        Assert.Equal("Bygg AB – Lager", c.Name);
+        Assert.Equal(@"C:\Ftg\FTG7", c.CompanyPath);
+        Assert.True(File.Exists(Path.Combine(_dataDir, "bolag-att-importera.json.importerad")));
+    }
+
     public void Dispose()
     {
         SqliteConnection.ClearAllPools();

@@ -1,4 +1,4 @@
-import { $, api, esc, fmt, fmtTime, showMsg, ensureLoggedIn, logout, icon } from './common.js';
+import { $, api, esc, fmt, fmtTime, showMsg, ensureLoggedIn, logout, icon, totpSetup } from './common.js';
 
 const main = $('#main');
 const dlg = $('#dlg');
@@ -22,9 +22,9 @@ function go(tab) { location.hash = tab; }
 function route() {
   let [tab, id] = (location.hash.slice(1) || 'sessions').split('/');
   // Utan valt bolag finns bara de bolagsoberoende flikarna.
-  if (!me.company && !['companies', 'users', 'audit'].includes(tab)) tab = 'companies';
+  if (!me.company && !['companies', 'users', 'audit', 'server'].includes(tab)) tab = 'companies';
   $('#tabs').querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
-  const r = { sessions: () => id ? sessionView(Number(id)) : sessionsView(), barcodes: barcodesView, companies: companiesView, users: usersView, audit: auditView }[tab] ?? sessionsView;
+  const r = { sessions: () => id ? sessionView(Number(id)) : sessionsView(), barcodes: barcodesView, companies: companiesView, users: usersView, server: serverView, audit: auditView }[tab] ?? sessionsView;
   r().catch((e) => showMsg(main, e.message));
 }
 
@@ -600,6 +600,10 @@ function companyDialog(c, directory) {
 }
 
 // ---------- Användare ----------
+const totpCell = (u) => u.totpEnabled
+  ? `<span class="pill Open">${icon('shield', 13)} Aktiv</span>`
+  : u.requireTotp ? '<span class="pill Locked">Krävs – ej aktiverad</span>' : '<span class="secondary">Av</span>';
+
 async function usersView() {
   const [users, companies] = await Promise.all([api('GET', '/api/admin/users'), api('GET', '/api/admin/companies')]);
   const cname = (id) => companies.find((c) => c.id === id)?.name ?? `#${id}`;
@@ -612,76 +616,175 @@ async function usersView() {
         <input id="dn" placeholder="Namn">
         <select id="ur" class="shrink" style="width:auto"><option value="Counter">Räknare</option><option value="Admin">Admin</option></select>
         <select id="uc" class="shrink" style="width:auto"><option value="">Alla bolag</option>${companies.map((c) => `<option value="${c.id}">Bara ${esc(c.name)}</option>`).join('')}</select>
-        <button class="primary shrink">Skapa</button>
+        <label class="check shrink" style="margin:0"><input type="checkbox" id="ut"> Kräv tvåfaktor</label>
+        <button class="primary shrink">${icon('plus', 16)}Skapa</button>
       </form>
-      <p class="hint">Ett lösenord genereras och visas en gång.</p>
+      <p class="hint">Ett lösenord genereras och visas en gång. Med "Kräv tvåfaktor" måste användaren aktivera en autentiseringsapp vid första inloggningen.</p>
       <div id="umsg"></div>
     </div>
     <div class="card flush"><div class="table-wrap"><table>
-      <thead><tr><th>Användarnamn</th><th>Namn</th><th>Roll</th><th>Bolag</th><th>Tvåfaktor</th><th>Status</th><th></th></tr></thead>
-      <tbody>${users.map((u) => `<tr><td>${esc(u.userName)}</td><td>${esc(u.displayName)}</td><td>${u.role === 'Admin' ? 'Admin' : 'Räknare'}</td>
-        <td>${u.role === 'Admin' || !u.companyIds.length ? '<span class="secondary">Alla</span>' : esc(u.companyIds.map(cname).join(', '))}
-          ${u.role !== 'Admin' ? `<button class="icon-btn ghost" title="Ändra bolag" data-comp="${u.id}">${icon('edit', 14)}</button>` : ''}</td>
-        <td>${u.totpEnabled ? `<span class="pos">${icon('shield', 14)} Ja</span>` : '<span class="secondary">Nej</span>'}</td><td>${u.isActive ? (u.locked ? '<span class="pill Cancelled">Spärrad</span>' : '<span class="pill Open">Aktiv</span>') : '<span class="pill">Inaktiv</span>'}</td>
-        <td class="actions">
-          <button class="small shrink" data-pw="${u.id}">Nytt lösenord</button>
-          ${u.totpEnabled ? `<button class="small shrink" data-totp="${u.id}">Återställ 2FA</button>` : ''}
-          ${u.id !== me.id ? `<button class="small shrink" data-role="${u.id}" data-to="${u.role === 'Admin' ? 'Counter' : 'Admin'}">${u.role === 'Admin' ? 'Gör till räknare' : 'Gör till admin'}</button>
-          <button class="small shrink ${u.isActive ? 'danger' : ''}" data-act="${u.id}" data-to="${!u.isActive}">${u.isActive ? 'Inaktivera' : 'Aktivera'}</button>` : ''}
-        </td></tr>`).join('')}</tbody></table></div></div>
-    <div class="card"><h2>Mitt lösenord</h2>
-      <form id="pf" class="row" style="flex-wrap:wrap">
-        <input id="cur" type="password" placeholder="Nuvarande" autocomplete="current-password" required>
-        <input id="nw" type="password" placeholder="Nytt (minst 10 tecken)" autocomplete="new-password" required>
-        <button class="shrink">Byt</button>
-      </form><div id="pmsg"></div></div>`;
+      <thead><tr><th>Användare</th><th>Roll</th><th>Bolag</th><th>Tvåfaktor</th><th>Status</th><th></th></tr></thead>
+      <tbody>${users.map((u) => `<tr class="clickable" data-user="${u.id}">
+        <td><b>${esc(u.displayName || u.userName)}</b><div class="secondary">${esc(u.userName)}</div></td>
+        <td>${u.role === 'Admin' ? 'Admin' : 'Räknare'}</td>
+        <td>${u.role === 'Admin' || !u.companyIds.length ? '<span class="secondary">Alla</span>' : esc(u.companyIds.map(cname).join(', '))}</td>
+        <td>${totpCell(u)}</td>
+        <td>${u.isActive ? (u.locked ? '<span class="pill Cancelled">Spärrad</span>' : '<span class="pill Open">Aktiv</span>') : '<span class="pill">Inaktiv</span>'}</td>
+        <td class="actions secondary">${icon('chevron', 16)}</td></tr>`).join('')}</tbody></table></div></div>
+    <div class="grid-2">
+      <div class="card"><h2>Mitt lösenord</h2>
+        <form id="pf" class="row" style="flex-wrap:wrap">
+          <input id="cur" type="password" placeholder="Nuvarande" autocomplete="current-password" required>
+          <input id="nw" type="password" placeholder="Nytt (minst 10 tecken)" autocomplete="new-password" required>
+          <button class="shrink">Byt</button>
+        </form><div id="pmsg"></div></div>
+      <div class="card"><h2>Min tvåfaktor</h2>
+        <p class="muted" style="margin-top:0">${me.totpEnabled ? (me.totpRequired ? 'Påslagen. Krävs för ditt konto.' : 'Påslagen.') : 'Avstängd. Med tvåfaktor krävs en kod från telefonen utöver lösenordet.'}</p>
+        ${!me.totpEnabled ? `<button id="myTotpOn" class="primary">${icon('shield', 16)}Slå på tvåfaktor</button>` : ''}
+        ${me.totpEnabled && !me.totpRequired ? `<form id="myTotpOff" class="row" style="flex-wrap:wrap">
+          <input id="offPw" type="password" placeholder="Lösenord" autocomplete="current-password" required>
+          <input id="offCode" placeholder="Kod" inputmode="numeric" maxlength="7" required>
+          <button class="danger shrink">Stäng av</button></form>` : ''}
+        <div id="tmsg2"></div></div>
+    </div>`;
 
   $('#uf').onsubmit = async (e) => {
     e.preventDefault();
     try {
-      const r = await api('POST', '/api/admin/users', { userName: $('#un').value, displayName: $('#dn').value, role: $('#ur').value, companyIds: $('#uc').value ? [Number($('#uc').value)] : [] });
+      const r = await api('POST', '/api/admin/users', { userName: $('#un').value, displayName: $('#dn').value, role: $('#ur').value,
+        companyIds: $('#uc').value ? [Number($('#uc').value)] : [], requireTotp: $('#ut').checked });
       await usersView();
       showMsg($('#umsg'), `Användaren skapad. Lösenord: ${r.password}  (visas bara nu)`, 'ok');
     } catch (err) { showMsg($('#umsg'), err.message); }
   };
-  const put = async (id, body) => { try { await api('PUT', `/api/admin/users/${id}`, body); await usersView(); } catch (e) { alert(e.message); } };
-  main.querySelectorAll('[data-pw]').forEach((b) => b.onclick = async () => {
-    const pw = genPassword();
-    if (!confirm('Sätta ett nytt slumpat lösenord?')) return;
-    await put(b.dataset.pw, { userName: '', role: '', password: pw });
-    showMsg($('#umsg'), `Nytt lösenord: ${pw}  (visas bara nu)`, 'ok');
-  });
-  main.querySelectorAll('[data-totp]').forEach((b) => b.onclick = async () => {
-    if (!confirm('Återställ tvåfaktor? Användaren får aktivera den igen vid nästa inloggning.')) return;
-    await api('POST', `/api/admin/users/${b.dataset.totp}/reset-totp`); usersView();
-  });
-  main.querySelectorAll('[data-role]').forEach((b) => b.onclick = () => put(b.dataset.role, { userName: '', role: b.dataset.to }));
-  main.querySelectorAll('[data-comp]').forEach((b) => b.onclick = () => {
-    const u = users.find((x) => x.id === Number(b.dataset.comp));
-    dlg.innerHTML = `<form id="cf"><h2>Bolag för ${esc(u.userName)}</h2>
-      <p class="hint">Inget markerat = alla bolag.</p>
-      ${companies.map((c) => `<label class="check"><input type="checkbox" value="${c.id}" ${u.companyIds.includes(c.id) ? 'checked' : ''}> ${esc(c.name)}</label>`).join('')}
-      <div class="dialog-actions"><button type="button" id="cc">Avbryt</button><button class="primary">Spara</button></div></form>`;
-    dlg.showModal();
-    $('#cc', dlg).onclick = () => dlg.close();
-    $('#cf', dlg).onsubmit = async (e) => {
-      e.preventDefault();
-      const ids = [...dlg.querySelectorAll('input[type=checkbox]:checked')].map((x) => Number(x.value));
-      dlg.close();
-      await put(u.id, { userName: '', role: '', companyIds: ids });
-    };
-  });
-  main.querySelectorAll('[data-act]').forEach((b) => b.onclick = () => put(b.dataset.act, { userName: '', role: '', isActive: b.dataset.to === 'true' }));
+  main.querySelectorAll('tr[data-user]').forEach((tr) => tr.onclick = () => userDialog(users.find((x) => x.id === Number(tr.dataset.user)), companies));
   $('#pf').onsubmit = async (e) => {
     e.preventDefault();
     try { await api('POST', '/api/auth/password', { currentPassword: $('#cur').value, newPassword: $('#nw').value }); location.reload(); }
     catch (err) { showMsg($('#pmsg'), err.message); }
+  };
+  $('#myTotpOn')?.addEventListener('click', async () => { await totpSetup(main, me, true); location.reload(); });
+  $('#myTotpOff')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try { await api('POST', '/api/auth/totp/disable', { password: $('#offPw').value, code: $('#offCode').value }); location.reload(); }
+    catch (err) { showMsg($('#tmsg2'), err.message); }
+  });
+}
+
+function userDialog(u, companies) {
+  const self = u.id === me.id;
+  dlg.innerHTML = `
+    <form id="ud" autocomplete="off">
+      <h2>${esc(u.displayName || u.userName)}</h2>
+      <p class="hint" style="margin-top:-6px">Användarnamn: <b>${esc(u.userName)}</b></p>
+      <label for="udn">Namn</label><input id="udn" value="${esc(u.displayName)}">
+      <div class="row">
+        <div><label for="udr">Roll</label><select id="udr" ${self ? 'disabled' : ''}><option value="Counter" ${u.role === 'Counter' ? 'selected' : ''}>Räknare</option><option value="Admin" ${u.role === 'Admin' ? 'selected' : ''}>Admin</option></select></div>
+        <div><label for="uds">Status</label><select id="uds" ${self ? 'disabled' : ''}><option value="true" ${u.isActive ? 'selected' : ''}>Aktiv</option><option value="false" ${u.isActive ? '' : 'selected'}>Inaktiv</option></select></div>
+      </div>
+      <label>Bolag <span class="hint">(inget markerat = alla bolag; gäller räknare)</span></label>
+      ${companies.map((c) => `<label class="check" style="margin:4px 0"><input type="checkbox" name="co" value="${c.id}" ${u.companyIds.includes(c.id) ? 'checked' : ''}> ${esc(c.name)}</label>`).join('')}
+      <label>Tvåfaktor</label>
+      <label class="check" style="margin:4px 0"><input type="checkbox" id="udt" ${u.requireTotp ? 'checked' : ''}> Kräv tvåfaktor för den här användaren</label>
+      <p class="hint" style="margin:0 0 0 26px">${u.totpEnabled ? 'Användaren har aktiverat tvåfaktor.' : 'Inte aktiverad ännu.'}</p>
+      <div class="toolbar" style="margin-top:14px">
+        <button type="button" class="small" id="udpw">Nytt lösenord</button>
+        ${u.totpEnabled ? `<button type="button" class="small" id="udreset">Återställ tvåfaktor</button>` : ''}
+      </div>
+      <div id="udmsg"></div>
+      <div class="dialog-actions"><button type="button" id="udc">Avbryt</button><button class="primary">Spara</button></div>
+    </form>`;
+  dlg.showModal();
+  const done = async (msg) => { dlg.close(); await usersView(); if (msg) showMsg($('#umsg'), msg, 'ok'); };
+  $('#udc', dlg).onclick = () => dlg.close();
+  $('#udpw', dlg).onclick = async () => {
+    const pw = genPassword();
+    try { await api('PUT', `/api/admin/users/${u.id}`, { userName: '', role: '', password: pw }); await done(`Nytt lösenord för ${u.userName}: ${pw}  (visas bara nu)`); }
+    catch (e) { showMsg($('#udmsg', dlg), e.message); }
+  };
+  $('#udreset', dlg)?.addEventListener('click', async () => {
+    try { await api('POST', `/api/admin/users/${u.id}/reset-totp`); await done(`Tvåfaktor återställd för ${u.userName}. Användaren aktiverar den igen vid nästa inloggning${u.requireTotp ? '' : ' om den slås på'}.`); }
+    catch (e) { showMsg($('#udmsg', dlg), e.message); }
+  });
+  $('#ud', dlg).onsubmit = async (e) => {
+    e.preventDefault();
+    try {
+      await api('PUT', `/api/admin/users/${u.id}`, {
+        userName: '', displayName: $('#udn', dlg).value, role: self ? '' : $('#udr', dlg).value,
+        isActive: self ? null : $('#uds', dlg).value === 'true', requireTotp: $('#udt', dlg).checked,
+        companyIds: [...dlg.querySelectorAll('input[name=co]:checked')].map((x) => Number(x.value)),
+      });
+      await done();
+    } catch (err) { showMsg($('#udmsg', dlg), err.message); }
   };
 }
 
 function genPassword() {
   const c = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
   return Array.from(crypto.getRandomValues(new Uint32Array(12)), (n) => c[n % c.length]).join('');
+}
+
+// ---------- Server ----------
+const HTTPS_MODE = {
+  InternalCa: 'Egen intern certifikatutfärdare', SelfSigned: 'Självsignerat certifikat',
+  Existing: 'Befintligt certifikat', None: 'Inget https',
+};
+
+async function serverView() {
+  const s = await api('GET', '/api/admin/server');
+  const c = s.certificate;
+  const validity = !c ? '' : c.daysLeft < 0 ? '<span class="pill Cancelled">Har gått ut</span>'
+    : c.daysLeft <= 30 ? `<span class="pill Locked">Går ut om ${c.daysLeft} dagar</span>` : `<span class="pill Open">Giltigt</span>`;
+  const qr = (() => { try { const q = qrcode(0, 'M'); q.addData(s.certificatePage); q.make(); return q.createImgTag(4, 6); } catch { return ''; } })();
+  main.innerHTML = `
+    ${pageHead('Server', 'Https och certifikat för tjänsten')}
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-head" style="margin-bottom:12px"><h2>Https</h2>${s.enabled ? validity : '<span class="pill">Av</span>'}</div>
+        <table><tbody>
+          <tr><td class="secondary" style="width:38%">Läge</td><td><b>${esc(HTTPS_MODE[s.mode] ?? s.mode)}</b></td></tr>
+          ${s.httpsUrl ? `<tr><td class="secondary">Adress</td><td><code>${esc(s.httpsUrl)}</code></td></tr>` : ''}
+          ${c ? `
+          <tr><td class="secondary">Certifikat för</td><td>${esc(c.subject)}${c.names.length ? `<div class="secondary">${esc(c.names.join(', '))}</div>` : ''}</td></tr>
+          <tr><td class="secondary">Utfärdat av</td><td>${esc(c.issuer)}</td></tr>
+          <tr><td class="secondary">Giltigt</td><td>${fmtTime(c.notBefore).slice(0, 10)} – ${fmtTime(c.notAfter).slice(0, 10)}</td></tr>
+          <tr><td class="secondary">Tumavtryck</td><td><code class="secondary">${esc(c.thumbprint)}</code></td></tr>` : s.enabled
+            ? `<tr><td colspan="2"><div class="msg bad">${icon('alert', 16)}<div class="grow">Inget giltigt servercertifikat hittades.</div></div></td></tr>`
+            : `<tr><td colspan="2" class="secondary">Tjänsten körs bara över http. Mobilens kamera kräver https.</td></tr>`}
+        </tbody></table>
+      </div>
+      <div class="card">
+        <h2>Telefoner</h2>
+        ${s.mode === 'InternalCa' || s.mode === 'SelfSigned' ? `
+          <p class="muted" style="margin-top:0">Öppna certifikatsidan på varje telefon och installera certifikatet en gång.</p>
+          <div class="row" style="align-items:center;gap:16px"><div class="shrink qr">${qr}</div>
+          <div><code>${esc(s.certificatePage)}</code><p class="hint">Skanna QR-koden med telefonens kamera.</p></div></div>`
+          : `<p class="muted" style="margin-top:0">${s.enabled ? 'Certifikatet är betrott av telefonerna. Inget behöver installeras.' : 'Slå på https för att kunna använda kameran.'}</p>`}
+      </div>
+    </div>
+    <div class="card">
+      <h2>Byt certifikat</h2>
+      ${s.canUpload ? `
+        <p class="muted" style="margin-top:0">Ladda upp ett certifikat (.pfx med privat nyckel), t.ex. från Let's Encrypt eller företagets egen certifikatutfärdare. Det börjar gälla direkt, utan omstart.</p>
+        <form id="cu" class="row" style="flex-wrap:wrap;align-items:flex-end">
+          <div style="flex:2"><label for="cfile">Certifikatfil (.pfx)</label><input type="file" id="cfile" accept=".pfx,.p12" required></div>
+          <div><label for="cpw">Lösenord</label><input type="password" id="cpw" autocomplete="off"></div>
+          <button class="primary shrink">${icon('upload', 16)}Ladda upp</button>
+        </form>` : `<p class="muted" style="margin-top:0">${s.windows ? 'Tjänsten är installerad utan https.' : 'Certifikat kan bara bytas när tjänsten körs på Windows-servern.'}</p>`}
+      <div id="cumsg"></div>
+      <p class="hint">Vill du skapa ett nytt internt certifikat eller byta https-läge: dubbelklicka på <b>Byt certifikat.cmd</b> i installationsmappen på servern. Rotcertifikatet återanvänds, så telefonerna behöver inte installera något nytt.</p>
+    </div>`;
+  $('#cu')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const form = new FormData();
+    form.append('file', $('#cfile').files[0]);
+    form.append('password', $('#cpw').value);
+    const res = await fetch('/api/admin/server/certificate', { method: 'POST', body: form, headers: { 'X-Requested-With': 'inventering' }, credentials: 'same-origin' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return showMsg($('#cumsg'), data.error ?? `Fel ${res.status}`);
+    await serverView();
+    showMsg($('#cumsg'), `Nytt certifikat för ${data.subject} används nu.`, 'ok');
+  });
 }
 
 // ---------- Logg ----------

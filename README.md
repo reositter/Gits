@@ -77,13 +77,12 @@ admin-sidan syns om underlaget finns.
 .\deploy\bygg-paket.ps1          # → dist\Inventering (app\, installera.ps1, LÄS MIG.txt)
 ```
 
-**2. Installera på servern.** Kopiera `dist\Inventering` till servern och kör som administratör:
+**2. Installera på servern.** Kopiera `dist\Inventering` till servern och dubbelklicka på
+**Installera.cmd**. Den ber om administratörsbehörighet och kör `installera.ps1`.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\installera.ps1
-```
-
-Skriptet frågar efter installations- och datamapp, portar och **hur https ska ordnas**:
+Installationen kontrollerar .NET Framework 4.8 och att Visma (ADK) svarar. Den listar företagen i
+Visma och låter dig välja vilka som ska med och vad de ska heta. Sedan frågar den efter mappar,
+portar och **hur https ska ordnas**:
 
 | Val | Vad skriptet gör | Passar när |
 |---|---|---|
@@ -100,8 +99,12 @@ vid fel. Det öppnar portarna i brandväggen, bara för domän- och privata nät
 Sidan nås över vanlig http och har en knapp för att hämta certifikatet, steg för iPhone och Android
 samt en QR-kod när den visas på en dator. All annan trafik skickas vidare till https.
 
-**Uppdatera:** kör `installera.ps1` från ett nytt paket. Inställningar och data behålls.
-**Byta certifikat:** `.\installera.ps1 -BaraCertifikat`. Servercertifikaten gäller i 825 dagar,
+**Uppdatera:** dubbelklicka på `Installera.cmd` i ett nytt paket. Inställningar och data behålls.
+**Byta certifikat:** IIS används inte, tjänsten har en egen webbserver. Det finns två sätt:
+- **Administration → Server** visar aktuellt certifikat och hur länge det gäller. Där kan man ladda
+  upp ett nytt `.pfx`, som börjar gälla direkt utan omstart.
+- Dubbelklicka på **Byt certifikat.cmd** i installationsmappen för att skapa nya interna
+  certifikat eller byta https-läge. Servercertifikaten gäller i 825 dagar,
 vilket är det längsta iPhone godtar. Rotcertifikatet återanvänds vid förnyelse, så telefonerna
 behöver inte installera något nytt.
 
@@ -209,6 +212,18 @@ dotnet ef migrations add <Namn> --project src/Inventering.Web --output-dir Data/
 
 Återställ från säkerhetskopia: stoppa tjänsten, ersätt `inventory.db` med kopian (ta bort
 `inventory.db-wal` och `-shm`) och installera den version av tjänsten som hörde till kopian.
+
+## Tvåfaktor
+
+Inloggning med autentiseringsapp (TOTP), t.ex. Microsoft Authenticator eller Google Authenticator.
+
+- **Per användare:** under Administration → Användare → (användare) kan **Kräv tvåfaktor** bockas i.
+  Användaren måste då aktivera tvåfaktor vid nästa inloggning, och pågående inloggningar avslutas.
+- **Valfritt:** varje användare kan själv slå på tvåfaktor. I mobilen görs det via menyn →
+  Tvåfaktorsinloggning, och för admin under Användare → Min tvåfaktor. Den kan stängas av med
+  lösenord och kod, om den inte krävs.
+- **Globalt:** `Security:RequireTotpForAdmin`, som är på som standard, och `Security:RequireTotpForAll`.
+- Admin kan återställa tvåfaktor för en användare som tappat bort sin telefon.
 
 ## Säkerhetsinställningar (`Security`)
 

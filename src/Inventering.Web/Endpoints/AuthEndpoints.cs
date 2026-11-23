@@ -14,6 +14,7 @@ public record LoginRequest(string UserName, string Password, string? TotpCode);
 public record CodeRequest(string Code);
 public record ChangePasswordRequest(string CurrentPassword, string NewPassword);
 public record SelectCompanyRequest(int CompanyId);
+public record DisableTotpRequest(string Password, string Code);
 
 public static class AuthEndpoints
 {
@@ -100,6 +101,7 @@ public static class AuthEndpoints
                 user.Id, user.UserName, user.DisplayName,
                 role = user.Role.ToString(),
                 totpEnabled = user.TotpSecret != null,
+                totpRequired = TotpRequired(user, opt.Value),
                 mfa = http.User.HasClaim(Claims.Mfa, "1"),
                 mustSetupTotp = MustSetupTotp(user, opt.Value),
             });
@@ -135,6 +137,22 @@ public static class AuthEndpoints
             return Results.Ok(new { ok = true });
         }).RequireAuthorization();
 
+        // Stäng av egen tvåfaktor – bara om den inte krävs. Kräver lösenord och en giltig kod.
+        g.MapPost("/totp/disable", async (DisableTotpRequest req, HttpContext http, AppDb db, PasswordService pw, IOptions<SecurityOptions> opt) =>
+        {
+            var user = await db.Users.FindAsync(http.User.RequiredUserId());
+            if (user is null) return Results.Unauthorized();
+            if (user.TotpSecret is null) return Results.BadRequest(new { error = "Tvåfaktor är inte påslagen." });
+            if (TotpRequired(user, opt.Value)) return Results.Json(new { error = "Tvåfaktor krävs för ditt konto och kan inte stängas av." }, statusCode: 403);
+            if (!pw.Verify(user, req.Password ?? "", out _)) return Results.BadRequest(new { error = "Fel lösenord." });
+            if (!Totp.Verify(user.TotpSecret, req.Code, user.LastTotpStep, out _)) return Results.BadRequest(new { error = "Fel kod." });
+            user.TotpSecret = null; user.LastTotpStep = null;
+            db.Log(http, "totp.disabled", user.UserName);
+            await db.SaveChangesAsync();
+            await SignIn(http, user, false, opt.Value, http.User.CompanyId());
+            return Results.Ok(new { ok = true });
+        }).RequireAuthorization();
+
         // Välj bolag att jobba i. Sparas i inloggningscookien.
         g.MapPost("/company", async (SelectCompanyRequest req, HttpContext http, AppDb db, IOptions<SecurityOptions> opt) =>
         {
@@ -163,8 +181,11 @@ public static class AuthEndpoints
         }).RequireAuthorization();
     }
 
-    public static bool MustSetupTotp(User u, SecurityOptions o) =>
-        u.TotpSecret == null && (o.RequireTotpForAll || (o.RequireTotpForAdmin && u.Role == UserRole.Admin));
+    /// <summary>Krävs tvåfaktor för användaren – globalt (alla/admin) eller per användare.</summary>
+    public static bool TotpRequired(User u, SecurityOptions o) =>
+        u.RequireTotp || o.RequireTotpForAll || (o.RequireTotpForAdmin && u.Role == UserRole.Admin);
+
+    public static bool MustSetupTotp(User u, SecurityOptions o) => u.TotpSecret == null && TotpRequired(u, o);
 
     private static async Task SignIn(HttpContext http, User user, bool mfa, SecurityOptions o, int? companyId)
     {
@@ -177,6 +198,7 @@ public static class AuthEndpoints
             new("stamp", Stamp(user)),
         };
         if (mfa) claims.Add(new Claim(Claims.Mfa, "1"));
+        if (user.RequireTotp) claims.Add(new Claim(Claims.TotpRequired, "1"));
         if (companyId is { } cid) claims.Add(new Claim(Claims.Company, cid.ToString()));
         var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme));
         await http.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal,
@@ -185,7 +207,7 @@ public static class AuthEndpoints
 
     public static string Stamp(User u) =>
         Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
-            System.Text.Encoding.UTF8.GetBytes($"{u.PasswordHash}|{u.Role}|{u.IsActive}|{u.TotpSecret}")))[..16];
+            System.Text.Encoding.UTF8.GetBytes($"{u.PasswordHash}|{u.Role}|{u.IsActive}|{u.TotpSecret}|{u.RequireTotp}")))[..16];
 
     private static string Protect(HttpContext http, string value) =>
         http.RequestServices.GetRequiredService<IDataProtectionProvider>()

@@ -7,7 +7,7 @@ using Microsoft.Extensions.Options;
 
 namespace Inventering.Web.Endpoints;
 
-public record UserRequest(string UserName, string? DisplayName, string Role, string? Password, bool? IsActive, List<int>? CompanyIds = null);
+public record UserRequest(string UserName, string? DisplayName, string Role, string? Password, bool? IsActive, List<int>? CompanyIds = null, bool? RequireTotp = null);
 public record CompanyRequest(string Name, string CompanyPath, string? VismaName, string? VismaUser, string? VismaPassword, bool? ClearPassword, bool IsActive, int SortOrder);
 
 /// <summary>Admin-funktioner som inte hör till ett visst bolag: bolag, användare, logg.</summary>
@@ -82,7 +82,7 @@ public static class AdminGlobalEndpoints
             return (await db.Users.AsNoTracking().OrderBy(u => u.UserName).ToListAsync()).Select(u => new
             {
                 u.Id, u.UserName, u.DisplayName, role = u.Role.ToString(), u.IsActive,
-                totpEnabled = u.TotpSecret != null, locked = u.LockedUntil > DateTimeOffset.UtcNow,
+                totpEnabled = u.TotpSecret != null, u.RequireTotp, locked = u.LockedUntil > DateTimeOffset.UtcNow,
                 companyIds = access[u.Id].ToList(),
             });
         });
@@ -94,7 +94,7 @@ public static class AdminGlobalEndpoints
             if (await db.Users.AnyAsync(u => u.UserName == req.UserName.Trim())) return Results.Conflict(new { error = "Användarnamnet finns redan." });
             var password = string.IsNullOrEmpty(req.Password) ? PasswordService.Generate(12) : req.Password;
             if (password.Length < opt.Value.MinPasswordLength) return Results.BadRequest(new { error = $"Lösenordet måste vara minst {opt.Value.MinPasswordLength} tecken." });
-            var u = new User { UserName = req.UserName.Trim(), DisplayName = req.DisplayName?.Trim() ?? "", Role = role };
+            var u = new User { UserName = req.UserName.Trim(), DisplayName = req.DisplayName?.Trim() ?? "", Role = role, RequireTotp = req.RequireTotp == true };
             u.PasswordHash = pw.Hash(u, password);
             db.Users.Add(u);
             await db.SaveChangesAsync();
@@ -127,6 +127,7 @@ public static class AdminGlobalEndpoints
                 u.PasswordHash = pw.Hash(u, req.Password);
                 u.LockedUntil = null; u.FailedLogins = 0;
             }
+            if (req.RequireTotp is { } rt) u.RequireTotp = rt;
             // Bolagsbehörighet: null = oförändrad, tom lista = alla bolag.
             if (req.CompanyIds is { } ids)
             {
