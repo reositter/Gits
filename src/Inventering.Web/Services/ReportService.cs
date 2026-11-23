@@ -81,8 +81,8 @@ public class ReportService(AppDb db, InventoryService inv, ArticleCache cache)
                 var price = Price(a.ArticleNo);
                 return new ReportUncounted(a.ArticleNo, a.Name, a.Unit, a.StockQuantity, price, price is { } p ? Math.Round(a.StockQuantity * p, 2) : null);
             }).ToList(),
-            Submissions = subs.Select(x => new ReportSubmission(x.Id, users.GetValueOrDefault(x.UserId) ?? $"#{x.UserId}", x.SubmittedAt, x.LineCount,
-                x.TotalQuantity, x.SignedWith == "password" ? "Lösenord" : "Admin-korrigering",
+            Submissions = subs.Select(x => new ReportSubmission(x.Id, x.CountedByName ?? users.GetValueOrDefault(x.UserId) ?? $"#{x.UserId}", x.SubmittedAt, x.LineCount,
+                x.TotalQuantity, x.SignedWith switch { "password" => "Lösenord", "excel-import" => "Excel-import" + (x.CountedByName is { } n ? $" ({n})" : ""), _ => "Admin-korrigering" },
                 SubmissionHasher.Compute(x, bySub[x.Id]) == x.Hash && bySub[x.Id].Count() == x.LineCount, x.Hash, x.Comment)).ToList(),
             Lines = lines.Select(l => new ReportLine(l.Id, l.ArticleNo, cache.Get(s.CompanyId, l.ArticleNo)?.Name ?? "", l.Quantity, l.Location, l.Comment,
                 l.ScannedCode, l.ScanVia, l.CountedAt, users.GetValueOrDefault(l.UserId) ?? $"#{l.UserId}", l.DeviceId, l.SubmissionId, l.IsVoided,

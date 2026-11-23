@@ -130,8 +130,8 @@ using (var scope = app.Services.CreateScope())
             db.Companies.Add(new Company { Name = Path.GetFileName(legacyPath.TrimEnd('\\', '/')), CompanyPath = legacyPath });
         else if (!vismaMode.Equals("Adk", StringComparison.OrdinalIgnoreCase))
         {
-            db.Companies.Add(new Company { Name = "Demo AB", CompanyPath = @"C:\Demo\Företag\FTG1", VismaName = "Demo AB", SortOrder = 1 });
-            db.Companies.Add(new Company { Name = "Testbygg AB", CompanyPath = @"C:\Demo\Företag\FTG2", VismaName = "Testbygg AB", SortOrder = 2 });
+            db.Companies.Add(new Company { Name = "Demo Bygg AB – Huvudlager", CompanyPath = @"C:\ProgramData\SPCS\SPCS Administration\Företag\FTG1", VismaName = "Demo Bygg AB", SortOrder = 1 });
+            db.Companies.Add(new Company { Name = "Demo Livs AB", CompanyPath = @"C:\ProgramData\SPCS\SPCS Administration\Företag\FTG2", VismaName = "FTG2", SortOrder = 2 });
         }
         db.SaveChanges();
     }
@@ -177,6 +177,7 @@ app.MapAuth();
 app.MapCount();
 app.MapAdmin();
 app.MapAdminGlobal();
+app.MapExcel();
 app.MapBarcodeAdmin();
 
 app.Run();

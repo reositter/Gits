@@ -1,4 +1,6 @@
 // Gemensamt för mobil- och admin-sidan: API-anrop, inloggning, tvåfaktor.
+import { icon } from './icons.js';
+export { icon };
 export const $ = (sel, root = document) => root.querySelector(sel);
 export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 export const fmt = (n) => n == null ? '' : Number(n).toLocaleString('sv-SE', { maximumFractionDigits: 3 });
@@ -28,8 +30,9 @@ export async function api(method, url, body) {
   return data;
 }
 
+const MSG_ICON = { ok: 'check', warn: 'alert', bad: 'alert' };
 export function showMsg(el, text, kind = 'bad') {
-  el.innerHTML = text ? `<div class="msg ${kind}">${esc(text)}</div>` : '';
+  el.innerHTML = text ? `<div class="msg ${kind}">${icon(MSG_ICON[kind] ?? 'alert', 16)}<div class="grow">${esc(text)}</div></div>` : '';
 }
 
 /** Visar inloggning i <main> och resolvar med användaren när man är inne (inkl. ev. TOTP-aktivering). */
@@ -65,7 +68,7 @@ export async function ensureLoggedIn(main, { requireAdmin = false } = {}) {
 function showCompany(me) {
   const el = document.getElementById('companyBtn');
   if (!el || !me.company) return;
-  el.textContent = `🏢 ${me.company.name}`;
+  el.innerHTML = `${icon('building', 16)}<span>${esc(me.company.name)}</span>${me.companies.length > 1 ? icon('down', 14) : ''}`;
   el.title = me.companies.length > 1 ? 'Byt bolag' : 'Bolag';
   el.classList.remove('hidden');
   el.disabled = me.companies.length < 2;
@@ -80,7 +83,7 @@ function showCompany(me) {
 function companyPicker(main, me) {
   return new Promise((resolve) => {
     if (me.companies.length === 0) {
-      main.innerHTML = `<div class="card"><h2>Inga bolag</h2><p>Du har inte behörighet till något bolag, eller så är inga bolag upplagda.
+      main.innerHTML = `<div class="card login"><h2>Inga bolag</h2><p>Du har inte behörighet till något bolag, eller så är inga bolag upplagda.
         ${me.role === 'Admin' ? 'Lägg till bolag under Admin → Bolag.' : 'Kontakta administratören.'}</p>
         ${me.role === 'Admin' ? '<a href="/admin.html#companies">Till admin</a>' : ''}
         <button id="lo" style="margin-top:12px">Logga ut</button></div>`;
@@ -93,12 +96,13 @@ function companyPicker(main, me) {
       return;
     }
     main.innerHTML = `
-      <div class="card">
+      <div class="login"><div class="card">
         <h2>Välj bolag</h2>
+        <p class="muted" style="margin:0 0 8px">Vilket bolag ska du arbeta i?</p>
         <ul class="list">${me.companies.map((c) => `
-          <li><div class="grow"><b>${esc(c.name)}</b></div>
-          <button class="${me.company?.id === c.id ? '' : 'primary'} shrink" data-id="${c.id}">${me.company?.id === c.id ? 'Valt' : 'Välj'}</button></li>`).join('')}</ul>
-      </div>`;
+          <li><span class="secondary">${icon('building', 18)}</span><div class="grow"><b>${esc(c.name)}</b></div>
+          <button class="${me.company?.id === c.id ? '' : 'primary'} shrink small" data-id="${c.id}">${me.company?.id === c.id ? 'Valt' : 'Välj'}</button></li>`).join('')}</ul>
+      </div></div>`;
     main.querySelectorAll('button[data-id]').forEach((b) => b.onclick = async () => {
       await api('POST', '/api/auth/company', { companyId: Number(b.dataset.id) });
       resolve();
@@ -109,8 +113,9 @@ function companyPicker(main, me) {
 function loginForm(main) {
   return new Promise((resolve) => {
     main.innerHTML = `
-      <form class="card" id="login" autocomplete="on">
+      <div class="login"><form class="card" id="login" autocomplete="on">
         <h2>Logga in</h2>
+        <p class="muted" style="margin:0 0 4px">Lagerinventering mot Visma Administration</p>
         <label for="u">Användarnamn</label>
         <input id="u" name="username" autocomplete="username" autocapitalize="none" required>
         <label for="p">Lösenord</label>
@@ -120,8 +125,8 @@ function loginForm(main) {
           <input id="t" name="otp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9 ]*">
         </div>
         <div id="lmsg"></div>
-        <button class="primary big" style="margin-top:12px">Logga in</button>
-      </form>`;
+        <button class="primary big" style="margin-top:16px">Logga in</button>
+      </form></div>`;
     const f = $('#login', main);
     $('#u', f).focus();
     f.addEventListener('submit', async (e) => {
@@ -147,7 +152,7 @@ async function totpSetup(main, me) {
   qr.addData(s.uri); qr.make();
   return new Promise((resolve) => {
     main.innerHTML = `
-      <form class="card" id="totp">
+      <div class="login" style="max-width:460px"><form class="card" id="totp">
         <h2>Aktivera tvåfaktorsinloggning</h2>
         <p>Kontot <b>${esc(me.userName)}</b> kräver tvåfaktor. Skanna koden med Microsoft Authenticator,
         Google Authenticator eller liknande och ange sedan den sexsiffriga koden.</p>
@@ -156,8 +161,8 @@ async function totpSetup(main, me) {
         <label for="c">Kod</label>
         <input id="c" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required>
         <div id="tmsg"></div>
-        <button class="primary big" style="margin-top:12px">Aktivera</button>
-      </form>`;
+        <button class="primary big" style="margin-top:16px">Aktivera</button>
+      </form></div>`;
     const f = $('#totp', main);
     $('#c', f).focus();
     f.addEventListener('submit', async (e) => {

@@ -12,6 +12,7 @@ till Visma Administration via ADK. Bakgrund och designbeslut finns i [docs/ARKIT
 | Flera mobiler samtidigt, summering per artikel, varningar | Klar |
 | Admin: starta/låsa/granska/stryka rader/korrigera/skicka, CSV-export | Klar |
 | Inloggning, roller, kontospärr, TOTP-tvåfaktor, händelselogg | Klar |
+| Inventering via Excel: skapa lista att skicka ut, läs in ifylld fil (dra och släpp) som en inlämning | Klar |
 | Rapporter: utskriftsvänlig HTML/PDF och Excel (sammanfattning, artiklar, inlämningar, alla rader) | Klar |
 | Flera bolag (FTG1, FTG2 …) med egna namn, bolagsval vid inloggning, behörighet per användare | Klar |
 | Streckkodsregler per kund (regex, GS1-128/DataMatrix) och extra streckkoder (t.ex. kartong = 12 st) | Klar |
@@ -112,6 +113,24 @@ Utan HTTPS fungerar sökfältet och handskannrar i tangentbordsläge, men inte k
 
 Lägg in en länk eller integrationspost, enligt befintligt upplägg med `dynamic.xml`, som öppnar
 `https://inventering.foretaget.se/admin.html` i webbläsaren.
+
+## Inventera via Excel
+
+På en öppen eller låst inventering finns kortet **Inventera via Excel**.
+
+1. **Skapa Excel-fil** ger en inventeringslista med bolagets lagerartiklar: artikelnr, benämning,
+   enhet, EAN, plats, en gul kolumn **Räknat antal** och kommentar. Det finns val för att visa
+   saldot (av som standard, så att man räknar utan att se förväntat antal), bara ej räknade
+   artiklar och ett intervall av artikelnummer. Bladet är skyddat mot ändringar utom i
+   inmatningsfälten och har en dold flik som anger vilken inventering det hör till.
+2. Listan skickas ut, skrivs ut eller fylls i på datorn. Räknaren skriver sitt namn under **Räknat av**.
+3. **Dra och släpp** den ifyllda filen, eller klicka för att välja den. En förhandsgranskning
+   visar rader, antal och eventuella fel, t.ex. text i antalskolumnen eller okända artiklar.
+4. **Läs in** gör raderna till en inlämning, precis som från mobilen. Inlämningen får typen
+   "Excel-import", namnet från filen och en kontrollsumma. Samma fil kan inte läsas in två
+   gånger av misstag.
+
+Egna Excel-filer fungerar också, om de har kolumnerna **Artikelnr** och **Räknat antal** (eller **Antal**).
 
 ## Rapporter
 

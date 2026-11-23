@@ -141,6 +141,11 @@ public class Submission
     public string Hash { get; set; } = "";
     public string? RemoteIp { get; set; }
     public string? Comment { get; set; }
+    /// <summary>Vid Excel-import: filnamn och SHA-256 av filen (hindrar att samma fil läses in två gånger).</summary>
+    public string? SourceFile { get; set; }
+    public string? SourceHash { get; set; }
+    /// <summary>Vid Excel-import: namnet som angavs i filen under "Räknat av".</summary>
+    public string? CountedByName { get; set; }
 }
 
 /// <summary>Utfall per artikel när inventeringen skickades till Visma.</summary>

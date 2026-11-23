@@ -3,24 +3,25 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Inventering – Admin</title>
+  <title>Inventering – Administration</title>
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/css/app.css">
   <script src="/lib/qrcode.js"></script>
 </head>
 <body>
-  <header class="bar">
-    <h1>Inventering · Admin</h1>
-    <button id="companyBtn" class="small hidden"></button>
-    <nav class="tabs hidden" id="tabs">
-      <button data-tab="sessions" class="active">Inventeringar</button>
-      <button data-tab="barcodes">Streckkoder</button>
-      <button data-tab="companies">Bolag</button>
-      <button data-tab="users">Användare</button>
-      <button data-tab="audit">Logg</button>
-    </nav>
-    <button id="logoutBtn" class="small hidden">Logga ut</button>
-  </header>
+  <header class="appbar"><div class="appbar-inner">
+    <a class="brand" href="/admin.html"><svg class="ic" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="m3 8 9 5 9-5M12 13v8"/></svg>Inventering<small>Administration</small></a>
+    <span class="spacer"></span>
+    <button id="companyBtn" class="hidden"></button>
+    <button id="logoutBtn" class="hidden" title="Logga ut"><svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg><span>Logga ut</span></button>
+  </div></header>
+  <div class="subnav hidden" id="subnav"><nav id="tabs">
+    <button data-tab="sessions" class="active">Inventeringar</button>
+    <button data-tab="barcodes">Streckkoder</button>
+    <button data-tab="companies">Bolag</button>
+    <button data-tab="users">Användare</button>
+    <button data-tab="audit">Händelselogg</button>
+  </nav></div>
   <main id="main" class="wide"><p class="muted">Laddar…</p></main>
   <dialog id="dlg"></dialog>
   <script type="module" src="/js/admin.js"></script>

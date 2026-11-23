@@ -81,7 +81,7 @@ public class ApiFlowTests : IDisposable
         // Uppslag via EAN och via artikelnr (artikel utan EAN)
         var art = await Json(await anna.GetAsync("/api/articles/lookup?code=7310000000011"));
         Assert.Equal("1001", art.GetProperty("articleNo").GetString());
-        Assert.Equal(HttpStatusCode.OK, (await anna.GetAsync("/api/articles/lookup?code=1003")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await anna.GetAsync("/api/articles/lookup?code=1003")).StatusCode); // finns bara i bygg-bolaget
 
         var annaLine = Guid.NewGuid();
         var lines1 = new[] { new { id = annaLine, articleNo = "1001", quantity = 12m, location = "A1" } };
@@ -158,7 +158,7 @@ public class ApiFlowTests : IDisposable
         // Rapporter
         var html = await (await admin.GetAsync($"/api/admin/sessions/{sid}/report.html")).Content.ReadAsStringAsync();
         Assert.Contains("Inventeringsrapport", html);
-        Assert.Contains("Demo AB", html);
+        Assert.Contains("Demo Bygg AB", html);
         Assert.Contains("Skruv M6x20", html);
         var xlsx = await admin.GetAsync($"/api/admin/sessions/{sid}/report.xlsx");
         Assert.Equal(HttpStatusCode.OK, xlsx.StatusCode);
@@ -176,7 +176,7 @@ public class ApiFlowTests : IDisposable
         Assert.Equal(HttpStatusCode.NotFound, (await admin.GetAsync($"/api/admin/sessions/{sid}/summary")).StatusCode);
         await Json(await admin.PostAsync("/api/admin/articles/refresh", null));
         Assert.Equal(HttpStatusCode.OK, (await admin.GetAsync("/api/articles/lookup?code=A100")).StatusCode);
-        Assert.Equal(HttpStatusCode.NotFound, (await admin.GetAsync("/api/articles/lookup?code=1003")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await admin.GetAsync("/api/articles/lookup?code=1003")).StatusCode); // finns bara i bygg-bolaget
     }
 
     [Fact]

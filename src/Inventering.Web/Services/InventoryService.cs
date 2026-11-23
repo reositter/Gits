@@ -28,8 +28,12 @@ public class InventoryService(AppDb db, ArticleCache cache, CompanyService compa
         var snapshot = await db.Snapshots.AsNoTracking().Where(s => s.SessionId == session.Id)
             .ToDictionaryAsync(s => s.ArticleNo, s => s.Quantity, StringComparer.OrdinalIgnoreCase);
         var users = await db.Users.AsNoTracking().ToDictionaryAsync(u => u.Id, u => string.IsNullOrEmpty(u.DisplayName) ? u.UserName : u.DisplayName);
+        // Excel-import: visa namnet som angavs i filen ("Räknat av") i stället för den som läste in.
+        var importedBy = await db.Submissions.AsNoTracking().Where(x => x.SessionId == session.Id && x.CountedByName != null)
+            .ToDictionaryAsync(x => x.Id, x => x.CountedByName);
         var summary = InventoryAggregator.Summarize(lines, snapshot, cache.ByArticleNo(session.CompanyId), users,
-            compareCurrentStock: session.Status is SessionStatus.Open or SessionStatus.Locked);
+            compareCurrentStock: session.Status is SessionStatus.Open or SessionStatus.Locked,
+            lineCounter: l => l.SubmissionId is { } sid && importedBy.TryGetValue(sid, out var n) ? n : null);
         var uncounted = InventoryAggregator.Uncounted(lines, cache.All(session.CompanyId));
         return (summary, uncounted);
     }

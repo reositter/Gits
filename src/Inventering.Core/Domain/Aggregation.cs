@@ -28,7 +28,8 @@ public static class InventoryAggregator
         IReadOnlyDictionary<string, Article> articles,
         IReadOnlyDictionary<int, string> userNames,
         decimal largeDeviationRatio = 0.5m,
-        bool compareCurrentStock = true)
+        bool compareCurrentStock = true,
+        Func<CountLine, string?>? lineCounter = null)
     {
         var active = lines.Where(l => !l.IsVoided).ToList();
 
@@ -72,7 +73,7 @@ public static class InventoryAggregator
                     current,
                     counted,
                     g.Count(),
-                    g.Select(l => userNames.TryGetValue(l.UserId, out var n) ? n : $"#{l.UserId}").Distinct().ToList(),
+                    g.Select(l => lineCounter?.Invoke(l) ?? (userNames.TryGetValue(l.UserId, out var n) ? n : $"#{l.UserId}")).Distinct().ToList(),
                     warnings);
             })
             .OrderBy(a => a.ArticleNo, StringComparer.OrdinalIgnoreCase)

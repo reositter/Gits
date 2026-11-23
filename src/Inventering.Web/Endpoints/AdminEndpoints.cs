@@ -117,12 +117,12 @@ public static class AdminEndpoints
             if (await CountEndpoints.SessionAsync(db, http, id) is null) return Results.NotFound();
             var subs = await db.Submissions.AsNoTracking().Where(s => s.SessionId == id).OrderBy(s => s.Id).ToListAsync();
             var lines = await db.Lines.AsNoTracking().Where(l => l.SessionId == id && l.SubmissionId != null).ToListAsync();
-            var byUser = await db.Users.AsNoTracking().ToDictionaryAsync(u => u.Id, u => u.UserName);
+            var byUser = await db.Users.AsNoTracking().ToDictionaryAsync(u => u.Id, u => string.IsNullOrEmpty(u.DisplayName) ? u.UserName : u.DisplayName);
             var bySub = lines.ToLookup(l => l.SubmissionId!.Value);
             return Results.Ok(subs.Select(s => new
             {
                 s.Id, s.SubmittedAt, user = byUser.GetValueOrDefault(s.UserId), s.LineCount, s.TotalQuantity, s.SignedWith,
-                s.DeviceId, s.RemoteIp, s.Comment, s.Hash,
+                s.DeviceId, s.RemoteIp, s.Comment, s.Hash, s.CountedByName, s.SourceFile,
                 // Kontrollsumman räknas om: falsk = raderna har ändrats i databasen efter signering.
                 intact = SubmissionHasher.Compute(s, bySub[s.Id]) == s.Hash && bySub[s.Id].Count() == s.LineCount,
                 voidedLines = bySub[s.Id].Count(l => l.IsVoided),

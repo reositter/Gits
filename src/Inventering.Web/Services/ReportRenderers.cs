@@ -67,7 +67,7 @@ public static class HtmlReport
 </section>
 """);
         if (m.DraftLines > 0)
-            sb.Append($"<p class=\"warn\">⚠ {m.DraftLines} rader är inte inlämnade och ingår inte i rapporten.</p>");
+            sb.Append($"<p class=\"warn\">{(m.DraftLines == 1 ? "1 rad är inte inlämnad och ingår" : $"{m.DraftLines} rader är inte inlämnade och ingår")} inte i rapporten.</p>");
         if (s.Status == Core.Domain.SessionStatus.Sent)
             sb.Append($"<p class=\"{(m.SendFailed > 0 ? "warn" : "ok")}\">Skickat till Vismas inventeringsunderlag: {m.SendOk} artiklar OK{(m.SendFailed > 0 ? $", {m.SendFailed} misslyckades" : "")}.</p>");
 
@@ -102,7 +102,7 @@ public static class HtmlReport
         sb.Append("<h2>Inlämningar (signerade av räknarna)</h2><table class=\"data\"><thead><tr><th>#</th><th>Räknare</th><th>Inlämnad</th><th class=\"n\">Rader</th><th class=\"n\">Totalt antal</th><th>Signerad med</th><th>Kontrollsumma</th><th>Kommentar</th></tr></thead><tbody>");
         foreach (var x in m.Submissions)
             sb.Append($"<tr><td>{x.Id}</td><td>{E(x.User)}</td><td>{T(x.SubmittedAt)}</td><td class=\"n\">{x.Lines}</td><td class=\"n\">{N(x.Total)}</td><td>{E(x.SignedWith)}</td>" +
-                      $"<td>{(x.Intact ? "✔ Intakt" : "<span class=\"neg\">⚠ Ändrad</span>")} <code>{E(x.Hash[..12])}</code></td><td>{E(x.Comment)}</td></tr>");
+                      $"<td>{(x.Intact ? "<span class=\"ok\">Intakt</span>" : "<span class=\"neg\">Ändrad efter signering</span>")} <code>{E(x.Hash[..12])}</code></td><td>{E(x.Comment)}</td></tr>");
         if (m.Submissions.Count == 0) sb.Append("<tr><td colspan=\"8\">Inga inlämningar.</td></tr>");
         sb.Append("</tbody></table>");
 

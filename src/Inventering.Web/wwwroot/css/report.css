@@ -1,10 +1,10 @@
 /* Inventeringsrapport – optimerad för utskrift (A4 liggande) och skärm. */
 @page { size: A4 landscape; margin: 12mm; }
-:root { --text: #1d2330; --muted: #667085; --border: #d8dce3; --pos: #1a7f45; --neg: #c0362c; --accent: #1f5fbf; }
+:root { --text: #1d2330; --muted: #667085; --border: #d8dce3; --pos: #1a7f45; --neg: #c0362c; --accent: #13294b; }
 * { box-sizing: border-box; }
-body { margin: 0 auto; max-width: 1200px; padding: 24px; color: var(--text); background: #fff; font: 12px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+body { margin: 0 auto; max-width: 1200px; padding: 24px; color: var(--text); background: #fff; font: 12px/1.45 "Segoe UI", system-ui, -apple-system, Roboto, sans-serif; }
 .toolbar { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; padding: 10px; background: #f4f5f7; border-radius: 8px; }
-.toolbar button { font: inherit; padding: 8px 14px; border: 0; border-radius: 6px; background: var(--accent); color: #fff; cursor: pointer; }
+.toolbar button { font: inherit; padding: 8px 14px; border: 0; border-radius: 6px; background: #1d5bbf; color: #fff; cursor: pointer; }
 .toolbar a { color: var(--accent); }
 .head { display: flex; justify-content: space-between; gap: 24px; border-bottom: 3px solid var(--accent); padding-bottom: 12px; margin-bottom: 16px; }
 .company { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }

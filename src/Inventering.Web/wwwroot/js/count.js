@@ -1,4 +1,4 @@
-import { $, api, esc, fmt, fmtTime, showMsg, ensureLoggedIn, logout } from './common.js';
+import { $, api, esc, fmt, fmtTime, showMsg, ensureLoggedIn, logout, icon } from './common.js';
 
 const main = $('#main');
 const QUEUE_KEY = 'inv.queue';
@@ -61,7 +61,7 @@ async function flush() {
 }
 function renderQueue() {
   const n = queue.all().length, b = $('#queueBadge');
-  b.textContent = `${n} ej skickade`;
+  b.innerHTML = `${icon('wifiOff', 14)}${n} ej skickade`;
   b.classList.toggle('hidden', n === 0);
 }
 setInterval(flush, 10000);
@@ -95,12 +95,12 @@ async function chooseSession() {
     <div class="card">
       <h2>Välj inventering</h2>
       ${sessions.length ? `<ul class="list">${sessions.map((s) => `
-        <li><div class="grow"><b>${esc(s.name)}</b><div class="muted">Startad ${fmtTime(s.createdAt)}</div></div>
+        <li><div class="grow"><b>${esc(s.name)}</b><div class="secondary">Startad ${fmtTime(s.createdAt)}</div></div>
         <button class="primary shrink" data-id="${s.id}">Välj</button></li>`).join('')}</ul>`
-        : `<p>Det finns ingen öppen inventering just nu.</p>`}
-      <div class="row" style="margin-top:12px">
-        <button id="reload">Uppdatera</button>
-        ${me.role === 'Admin' ? `<button onclick="location.href='/admin.html'">Till admin</button>` : ''}
+        : `<p class="muted">Det finns ingen öppen inventering just nu.</p>`}
+      <div class="toolbar" style="margin-top:14px">
+        <button id="reload">${icon('refresh', 16)}Uppdatera</button>
+        ${me.role === 'Admin' ? `<a class="btn" href="/admin.html">Administration</a>` : ''}
       </div>
     </div>`;
   main.querySelectorAll('button[data-id]').forEach((b) => b.onclick = () => {
@@ -113,21 +113,21 @@ async function chooseSession() {
 // ---------- Räkning ----------
 function renderCount() {
   prefs.sessionId = session.id; savePrefs();
-  $('#title').textContent = session.name;
   main.innerHTML = `
+    <div class="page-head" style="margin:0 0 12px"><div><h1 style="font-size:19px">${esc(session.name)}</h1><div class="sub">${esc(me.company?.name ?? '')}</div></div></div>
     <div class="card">
       <div id="reader" class="hidden"></div>
       <div class="row" style="margin-top:8px">
-        <button id="scanBtn" class="primary big">📷 Skanna streckkod</button>
+        <button id="scanBtn" class="primary big scan-btn">${icon('camera', 20)}Skanna streckkod</button>
       </div>
       <form id="manual" class="row" style="margin-top:12px" autocomplete="off">
-        <input id="code" placeholder="Artikelnr, EAN eller sök på namn" enterkeyhint="search" autocapitalize="none">
-        <button class="shrink">Sök</button>
+        <input id="code" placeholder="Artikelnr, EAN eller benämning" enterkeyhint="search" autocapitalize="none">
+        <button class="shrink" aria-label="Sök">${icon('search', 16)}Sök</button>
       </form>
       <div id="results"></div>
-      <div class="row" style="margin-top:8px">
-        <label class="row shrink" style="margin:0;color:var(--text)" title="Varje skanning sparas direkt som 1 st – skanna en gång per förpackning. Antalet kan ändras i efterhand."><input type="checkbox" id="quick" style="width:auto"> Snabbläge: 1 st per skanning</label>
-        <input id="loc" placeholder="Plats/hylla (valfritt)" value="${esc(prefs.location)}">
+      <div class="row" style="margin-top:10px">
+        <label class="check shrink" style="margin:0" title="Varje skanning sparas direkt som 1 st – skanna en gång per förpackning. Antalet kan ändras i efterhand."><input type="checkbox" id="quick"> Snabbläge</label>
+        <input id="loc" placeholder="Plats / hylla (valfritt)" value="${esc(prefs.location)}">
       </div>
     </div>
     <form id="entry" class="card hidden" autocomplete="off">
@@ -135,21 +135,21 @@ function renderCount() {
       <div class="muted" id="artMeta"></div>
       <label for="qty">Antal</label>
       <div class="qty">
-        <button type="button" id="minus">−</button>
+        <button type="button" id="minus" aria-label="Minska">${icon('minus', 20)}</button>
         <input id="qty" type="number" inputmode="decimal" step="any" min="0" required>
-        <button type="button" id="plus">+</button>
+        <button type="button" id="plus" aria-label="Öka">${icon('plus', 20)}</button>
       </div>
       <label for="comment">Kommentar (valfritt)</label>
       <input id="comment" maxlength="500">
-      <div class="row" style="margin-top:12px">
-        <button type="button" id="cancelEntry">Avbryt</button>
-        <button class="primary" id="saveEntry">Spara</button>
+      <div class="row" style="margin-top:16px">
+        <button type="button" id="cancelEntry" class="big">Avbryt</button>
+        <button class="primary big" id="saveEntry">Spara</button>
       </div>
     </form>
     <div id="flash"></div>
     <dialog id="submitDlg"></dialog>
     <div class="card">
-      <div class="row"><h2 style="margin:0">Mina rader</h2><button class="small shrink" id="switch">Byt inventering</button></div>
+      <div class="card-head"><h2>Mina rader</h2><button class="small" id="switch">Byt inventering</button></div>
       <ul class="list" id="mylines"><li class="muted">Laddar…</li></ul>
     </div>`;
 
@@ -162,7 +162,7 @@ function renderCount() {
   $('#plus').onclick = () => stepQty(1);
   $('#cancelEntry').onclick = closeEntry;
   $('#entry').onsubmit = (e) => { e.preventDefault(); saveEntry(); };
-  $('#switch').onclick = () => { stopScanner(); prefs.sessionId = null; savePrefs(); session = null; $('#title').textContent = 'Inventering'; chooseSession(); };
+  $('#switch').onclick = () => { stopScanner(); prefs.sessionId = null; savePrefs(); session = null; chooseSession(); };
   $('#qty').addEventListener('focus', (e) => e.target.select());
   $('#code').focus(); // Handskannrar i tangentbordsläge skriver hit och skickar Enter.
   loadMyLines();
@@ -286,20 +286,21 @@ async function loadMyLines() {
   const draftCount = drafts.length + pending.length;
   const lineRow = (l, opts) => `<li ${opts.edit ? `data-edit="${l.id}"` : ''}><div class="grow"><b>${esc(l.articleNo)}</b> ${esc(l.name)}
       <div class="muted">${opts.pending ? 'Väntar på uppkoppling' : fmtTime(l.countedAt)}${l.location ? ' · ' + esc(l.location) : ''}${l.comment ? ' · ' + esc(l.comment) : ''}</div></div>
-      ${opts.edit ? `<button class="small shrink qtybtn">${fmt(l.quantity)} ✎</button>` : `<span class="num">${fmt(l.quantity)}</span>`}
-      ${opts.del ? `<button class="small danger shrink" data-id="${l.id}" aria-label="Ta bort">✕</button>` : ''}</li>`;
+      ${opts.edit ? `<button class="small shrink qtybtn">${fmt(l.quantity)} ${icon('edit', 13)}</button>` : `<span class="num">${fmt(l.quantity)}</span>`}
+      ${opts.del ? `<button class="icon-btn danger shrink" data-id="${l.id}" aria-label="Ta bort">${icon('x', 15)}</button>` : ''}</li>`;
 
   el.innerHTML = `
-    <li class="muted" style="display:block">Ej inlämnade rader (${draftCount}) – kan ändras tills du lämnar in.</li>
+    <li class="section-label" style="display:block;border:0">Ej inlämnade · ${draftCount}</li>
     ${pending.map((l) => lineRow(l, { pending: true, edit: true })).join('')}
     ${drafts.map((l) => lineRow(l, { edit: true, del: true })).join('')}
     ${draftCount ? `<li style="display:block"><button class="primary big" id="submitBtn" ${pending.length ? 'disabled' : ''}>
-        ${pending.length ? 'Väntar på uppkoppling…' : `✍ Signera och lämna in ${drafts.length} ${drafts.length === 1 ? 'rad' : 'rader'}`}</button></li>` : ''}
+        ${pending.length ? 'Väntar på uppkoppling…' : `${icon('sign', 18)}Signera och lämna in ${drafts.length} ${drafts.length === 1 ? 'rad' : 'rader'}`}</button></li>` : ''}
+    ${subs.length ? `<li class="section-label" style="display:block;border:0;padding-top:20px">Inlämnade · ${subs.length}</li>` : ''}
     ${subs.map((sub) => `
       <li style="display:block">
         <details>
-          <summary><b>Inlämning #${sub.id}</b> · ${fmtTime(sub.submittedAt)} · ${sub.lineCount} rader · totalt ${fmt(sub.totalQuantity)}
-            <div class="muted">Kvitto ${esc(sub.hash.slice(0, 12))} · låst</div></summary>
+          <summary>${icon('chevron', 16)}<div><b>Inlämning #${sub.id}</b> · ${sub.lineCount} rader · totalt ${fmt(sub.totalQuantity)}
+            <div class="secondary">${fmtTime(sub.submittedAt)} · kvitto ${esc(sub.hash.slice(0, 10))} · ${icon('lock', 12)} låst</div></div></summary>
           <ul class="list">${lines.filter((l) => l.submissionId === sub.id).map((l) => lineRow(l, {})).join('')}</ul>
         </details>
       </li>`).join('')}
@@ -338,9 +339,9 @@ function submitDialog(drafts) {
       <label for="subPw">Ditt lösenord – signerar att räkningen är korrekt</label>
       <input id="subPw" type="password" autocomplete="current-password" required>
       <div id="subMsg"></div>
-      <div class="row" style="margin-top:12px">
+      <div class="dialog-actions">
         <button type="button" id="subCancel">Avbryt</button>
-        <button class="primary" id="subOk">Signera och lämna in</button>
+        <button class="primary" id="subOk">${icon('sign', 16)}Signera och lämna in</button>
       </div>
     </form>`;
   dlg.showModal();
@@ -353,7 +354,7 @@ function submitDialog(drafts) {
       const r = await api('POST', `/api/sessions/${session.id}/submit`, {
         password: $('#subPw', dlg).value, lineIds: drafts.map((l) => l.id), deviceId, comment: $('#subComment', dlg).value || null,
       });
-      dlg.innerHTML = `<h2>Inlämnat ✔</h2>
+      dlg.innerHTML = `<h2>${icon('check', 20)} Inlämnat</h2>
         <p><b>Inlämning #${r.id}</b><br>${fmtTime(r.submittedAt)} · ${r.lineCount} rader · totalt ${fmt(r.totalQuantity)}</p>
         <p class="muted">Kvitto: <code>${esc(r.hash.slice(0, 12))}</code></p>
         <button class="primary big" id="subDone">OK</button>`;
@@ -389,7 +390,7 @@ async function startScanner() {
       { fps: 10, qrbox: (w, h) => ({ width: Math.floor(w * 0.85), height: Math.floor(Math.min(h, w) * 0.45) }) },
       onScan, () => {});
     scanning = true;
-    $('#scanBtn').textContent = '■ Stoppa kamera';
+    $('#scanBtn').innerHTML = `${icon('stop', 20)}Stoppa kamera`;
   } catch (e) {
     $('#reader').classList.add('hidden');
     showMsg($('#results'), 'Kunde inte starta kameran: ' + (e?.message ?? e));
@@ -400,7 +401,7 @@ async function stopScanner() {
   if (scanner && scanning) { try { await scanner.stop(); } catch { } }
   scanning = false;
   $('#reader')?.classList.add('hidden');
-  const b = $('#scanBtn'); if (b) b.textContent = '📷 Skanna streckkod';
+  const b = $('#scanBtn'); if (b) b.innerHTML = `${icon('camera', 20)}Skanna streckkod`;
 }
 function pauseScanner() { if (scanning) try { scanner.pause(true); } catch { } }
 function resumeScanner() { if (scanning) try { scanner.resume(); } catch { } }

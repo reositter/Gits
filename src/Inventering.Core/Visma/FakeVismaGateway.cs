@@ -13,24 +13,30 @@ public class FakeVismaGateway : IVismaGateway
     /// <summary>Olika testdata per bolag så att det syns vilket bolag man jobbar i.</summary>
     public FakeVismaGateway(int seed)
     {
-        if (seed % 2 == 0)
-        {
-            void Add2(string no, string name, string? ean, decimal qty, string unit = "st") =>
-                _articles[no] = new Article { ArticleNo = no, Name = name, Ean = ean, StockQuantity = qty, Unit = unit, PurchasePrice = 10 + no.Sum(c => c) % 90, UpdatedAt = DateTimeOffset.UtcNow };
-            Add2("A100", "Gipsskiva 13 mm", "7320000000105", 120);
-            Add2("A200", "Regel 45x95 (m)", null, 800, "m");
-            Add2("A300", "Spik 75 mm (kg)", "7320000000303", 35, "kg");
-            Add2("1001", "Skruv M6x20 (100-pack)", "7310000000011", 15);
-            return;
-        }
-        void Add(string no, string name, string? ean, decimal qty, string unit = "st") =>
-            _articles[no] = new Article { ArticleNo = no, Name = name, Ean = ean, StockQuantity = qty, Unit = unit, PurchasePrice = 5 + no.Sum(c => c) % 120, UpdatedAt = DateTimeOffset.UtcNow };
-        Add("1001", "Skruv M6x20 (100-pack)", "7310000000011", 40);
-        Add("1002", "Mutter M6 (100-pack)", "7310000000028", 25);
-        Add("1003", "Bricka M6 (100-pack)", null, 12);
-        Add("2001", "Kabel 3x1,5 (m)", "7310000000042", 350, "m");
-        Add("2002", "Kopplingsdosa", null, 0);
-        Add("3001", "Arbetshandske strl 10", "7310000000066", 60, "par");
+        // (artikelnr, benämning, EAN, saldo, enhet, inpris)
+        (string, string, string?, decimal, string, decimal)[] bygg =
+        [
+            ("1001", "Skruv M6x20 förzinkad (100-pack)", "7310000000011", 40, "st", 79), ("1002", "Mutter M6 förzinkad (100-pack)", "7310000000028", 25, "st", 49),
+            ("1003", "Bricka M6 (100-pack)", null, 12, "st", 29), ("1010", "Träskruv 4,2x45 (200-pack)", "7310000000103", 64, "st", 119),
+            ("1011", "Träskruv 5,0x80 (100-pack)", "7310000000110", 38, "st", 139), ("1020", "Expander 8 mm (50-pack)", "7310000000202", 20, "st", 89),
+            ("2001", "Kabel EKK 3G1,5 (m)", "7310000000042", 350, "m", 12.5m), ("2002", "Kopplingsdosa IP44", null, 48, "st", 34),
+            ("2003", "Vägguttag dubbelt jordat", "7310000000301", 30, "st", 89), ("2004", "Strömbrytare 1-pol", "7310000000318", 26, "st", 69),
+            ("3001", "Arbetshandske strl 10", "7310000000066", 60, "par", 45), ("3002", "Skyddsglasögon klar", "7310000000073", 22, "st", 59),
+            ("3003", "Hörselkåpa", "7310000000080", 9, "st", 249), ("4001", "Gipsskiva 13 mm 1200x2500", "7320000000105", 120, "st", 129),
+            ("4002", "Regel 45x95 (m)", null, 800, "m", 24), ("4003", "Spik 75 mm (kg)", "7320000000303", 35, "kg", 59),
+            ("4004", "Fogskum 750 ml", "7320000000310", 44, "st", 119), ("4005", "Silikon sanitet vit", "7320000000327", 70, "st", 89),
+            ("5001", "Borr HSS 6 mm", "7330000000017", 55, "st", 39), ("5002", "Bits PH2 (10-pack)", "7330000000024", 40, "st", 79),
+        ];
+        (string, string, string?, decimal, string, decimal)[] livs =
+        [
+            ("A100", "Kaffe mellanrost 500 g", "7340000000014", 96, "st", 54), ("A101", "Te earl grey 100 p", "7340000000021", 40, "st", 42),
+            ("A200", "Vetemjöl 2 kg", "7340000000106", 150, "st", 19), ("A201", "Strösocker 2 kg", "7340000000113", 120, "st", 29),
+            ("A300", "Hushållsost (kg)", null, 34.5m, "kg", 99), ("A301", "Smör 500 g", "7340000000304", 80, "st", 59),
+            ("A400", "Olivolja 1 l", "7340000000403", 45, "st", 89), ("A401", "Pasta penne 1 kg", "7340000000410", 200, "st", 24),
+            ("1001", "Skruv M6x20 (100-pack)", "7310000000011", 15, "st", 79),
+        ];
+        foreach (var (no, name, ean, qty, unit, price) in seed % 2 == 0 ? livs : bygg)
+            _articles[no] = new Article { ArticleNo = no, Name = name, Ean = ean, StockQuantity = qty, Unit = unit, PurchasePrice = price, UpdatedAt = DateTimeOffset.UtcNow };
     }
 
     public string Name => "Fake (test)";
@@ -74,8 +80,8 @@ public class FakeVismaGatewayFactory : IVismaGatewayFactory
     public Task<IReadOnlyList<VismaCompanyInfo>> DiscoverCompaniesAsync(CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<VismaCompanyInfo>>(
         [
-            new("Demo AB", "FTG1", @"C:\Demo\Företag\FTG1", "SPCS_Adm_FTG1"),
-            new("Testbygg AB", "FTG2", @"C:\Demo\Företag\FTG2", "SPCS_Adm_FTG2"),
-            new("FTG3", "FTG3", @"C:\Demo\Företag\FTG3", "SPCS_Adm_FTG3"),
+            new("Demo Bygg AB", "FTG1", @"C:\ProgramData\SPCS\SPCS Administration\Företag\FTG1", "SPCS_Adm_FTG1"),
+            new("FTG2", "FTG2", @"C:\ProgramData\SPCS\SPCS Administration\Företag\FTG2", "SPCS_Adm_FTG2"),
+            new("Demo Service AB", "FTG3", @"C:\ProgramData\SPCS\SPCS Administration\Företag\FTG3", "SPCS_Adm_FTG3"),
         ]);
 }
