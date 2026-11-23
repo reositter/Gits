@@ -22,7 +22,7 @@ table.data td { padding: 4px 6px; border-bottom: 1px solid #eceef2; vertical-ali
 table.data tfoot td { font-weight: 700; border-top: 2px solid var(--text); border-bottom: 0; }
 table.data thead { display: table-header-group; }
 table.data tr { page-break-inside: avoid; }
-.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.n, table.data th.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .b { font-weight: 700; }
 .pos { color: var(--pos) !important; }
 .neg { color: var(--neg) !important; }

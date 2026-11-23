@@ -1,0 +1,11 @@
+.demo-banner { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; padding: 8px 16px; background: #fff4e0; color: #6b4200; font: 13px/1.4 system-ui, sans-serif; border-bottom: 1px solid #f0d199; }
+.demo-banner b { background: #b26a00; color: #fff; padding: 2px 8px; border-radius: 99px; letter-spacing: .05em; }
+.demo-banner span { flex: 1 1 260px; }
+.demo-banner a { color: #6b4200; }
+.demo-banner button { font: inherit; padding: 4px 10px; min-height: 0; border-radius: 6px; border: 1px solid #d9a441; background: #fff; color: #6b4200; cursor: pointer; }
+.demo-banner code { background: #fff; padding: 0 4px; border-radius: 4px; }
+@media (prefers-color-scheme: dark) {
+  .demo-banner { background: #3a2a0d; color: #f0d199; border-color: #5c4310; }
+  .demo-banner a, .demo-banner button { color: #f0d199; }
+  .demo-banner button, .demo-banner code { background: #1c2029; border-color: #5c4310; }
+}
