@@ -8,7 +8,7 @@ const platform = /iPhone|iPad|iPod/.test(ua) ? 'ios' : /Android/.test(ua) ? 'and
 const STEPS = {
   ios: [
     'Tryck på <b>Hämta certifikat</b> och välj <b>Tillåt</b>.',
-    'Öppna <b>Inställningar</b> och tryck på <b>Profil hämtad</b> högst upp. Välj <b>Installera</b> och ange telefonens kod.',
+    'Öppna <b>Inställningar</b> och tryck på <b>Profil hämtad</b> högst upp. Välj <b>Installera</b> och bekräfta med telefonens lösenkod (den du låser upp telefonen med).',
     'Gå till <b>Inställningar → Allmänt → Om → Certifikatförtroende</b> och slå på <b>Inventering rotcertifikat</b>.',
   ],
   android: [
