@@ -1,6 +1,6 @@
 # Inventering mot Visma Administration – arkitekturförslag
 
-Status: utkast att diskutera. Punkter markerade **[VERIFIERA]** måste kontrolleras mot er
+Status: utkast att diskutera. Första version byggd, se README.md. Punkter markerade **[VERIFIERA]** måste kontrolleras mot er
 ADK-version och befintlig kod innan vi bygger.
 
 ## 1. Mål
@@ -146,11 +146,18 @@ att Admin-delen bara är nåbar från LAN.
 4. HTTPS/certifikat på servern, installation som tjänst, länk från Visma.
 5. (Vid behov) 2FA för alla, extern åtkomst via VPN/tunnel.
 
-## 12. Frågor till er
+## 12. Besked hittills
 
-1. Vilken Visma Administration (500/1000/2000) och ADK-version? Flera lagerställen?
+- Visma Administration 1000/2000, **ett lagerställe** → ingen lagerställe-dimension behövs; valfritt fält
+  "plats/hylla" i mobilen används bara för att upptäcka dubbelräkning.
+- **Vissa artiklar saknar EAN** → uppslag sker på EAN först, sedan artikelnr, och annars fritextsök på
+  artikelnr/benämning i mobilen. Egna etiketter med artikelnr som Code128/QR fungerar också.
+- **Mobilens kamera** i första hand → HTTPS är ett krav (se §8).
+
+## 13. Öppna frågor
+
+1. Vilken ADK-version?
 2. Var finns den befintliga ADK-koden (repo)? .NET Framework eller .NET (Core)? x86?
 3. Har ni gjort inventering via ADK tidigare, eller bara artiklar/order?
-4. Har artiklarna EAN i Visma idag, ev. flera streckkoder per artikel?
-5. Kamera i mobilen eller dedikerade handskannrar (Zebra/Honeywell)?
-6. Finns intern DNS och en egen domän (för riktigt certifikat)?
+4. Kan en artikel ha flera streckkoder (t.ex. styck och förpackning)?
+5. Finns intern DNS och en egen domän (för riktigt certifikat)?

@@ -1,0 +1,10 @@
+bin/
+obj/
+*.user
+.vs/
+data/
+*.db
+*.db-shm
+*.db-wal
+*.pfx
+TestResults/
