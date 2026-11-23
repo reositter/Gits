@@ -107,8 +107,7 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDb>();
-    db.Database.EnsureCreated();
-    db.Database.ExecuteSqlRaw("PRAGMA journal_mode=WAL;");
+    DatabaseMigrator.Run(db, dataDir, app.Logger);
     if (!db.Users.Any())
     {
         var pw = scope.ServiceProvider.GetRequiredService<PasswordService>();

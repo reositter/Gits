@@ -189,6 +189,27 @@ Ger koden ett antal fylls det i automatiskt men kan ändras. I snabbläget anvä
 Det sparas på varje rad hur koden tolkades ("Tolkad via"), och det syns i radexporten.
 Regler kan testas innan de sparas.
 
+## Databas och uppdateringar
+
+SQLite-databasen (`inventory.db` i datakatalogen) hanteras med EF Core-migreringar
+(`src/Inventering.Web/Data/Migrations`). Vid varje start körs väntande migreringar automatiskt.
+
+- **Före en uppdatering** tas en säkerhetskopia till `backups/`, t.ex.
+  `inventory-20270115-0830-fore-20270110_NyKolumn.db`. De tio senaste sparas.
+- En databas från en tidig testversion, utan migreringshistorik, flyttas undan till
+  `inventory.db.fore-migreringar-<tid>` och en ny skapas.
+- Ett test säkerställer att ingen modelländring saknar migrering.
+
+Ny schemaändring (utvecklare):
+
+```bash
+dotnet tool restore
+dotnet ef migrations add <Namn> --project src/Inventering.Web --output-dir Data/Migrations
+```
+
+Återställ från säkerhetskopia: stoppa tjänsten, ersätt `inventory.db` med kopian (ta bort
+`inventory.db-wal` och `-shm`) och installera den version av tjänsten som hörde till kopian.
+
 ## Säkerhetsinställningar (`Security`)
 
 | Inställning | Standard | Kommentar |
@@ -212,5 +233,4 @@ Regler kan testas innan de sparas.
 1. Testa ADK-bryggan mot ett **testföretag** i Visma. Kör först `status`, sedan `articles`, sedan
    `inventory-write` på några artiklar. Kontrollera underlaget i Visma.
 2. Ta fram certifikat och DNS-namn, och installera på servern.
-3. Gå över till EF Core-migreringar innan första produktionssättningen. Schemat skapas nu med
-   `EnsureCreated`, så vid schemaändringar under utvecklingen måste `inventory.db` raderas.
+

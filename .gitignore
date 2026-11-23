@@ -9,3 +9,4 @@ data/
 *.pfx
 TestResults/
 lib/*.dll
+design-time.db
