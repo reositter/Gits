@@ -21,6 +21,11 @@ const savePrefs = () => store.set(PREFS_KEY, prefs);
 const queue = {
   all: () => store.get(QUEUE_KEY, []),
   add(line) { const q = this.all(); q.push(line); store.set(QUEUE_KEY, q); renderQueue(); },
+  update(id, fields) {
+    const q = this.all(); const l = q.find((x) => x.id === id);
+    if (!l) return false;
+    Object.assign(l, fields); store.set(QUEUE_KEY, q); return true;
+  },
   remove(ids) { store.set(QUEUE_KEY, this.all().filter((l) => !ids.includes(l.id))); renderQueue(); },
 };
 let flushing = false;
@@ -113,7 +118,7 @@ function renderCount() {
       </form>
       <div id="results"></div>
       <div class="row" style="margin-top:8px">
-        <label class="row shrink" style="margin:0;color:var(--text)"><input type="checkbox" id="quick" style="width:auto"> +1 per skanning</label>
+        <label class="row shrink" style="margin:0;color:var(--text)" title="Varje skanning sparas direkt som 1 st – skanna en gång per förpackning. Antalet kan ändras i efterhand."><input type="checkbox" id="quick" style="width:auto"> Snabbläge: 1 st per skanning</label>
         <input id="loc" placeholder="Plats/hylla (valfritt)" value="${esc(prefs.location)}">
       </div>
     </div>
@@ -130,7 +135,7 @@ function renderCount() {
       <input id="comment" maxlength="500">
       <div class="row" style="margin-top:12px">
         <button type="button" id="cancelEntry">Avbryt</button>
-        <button class="primary">Spara</button>
+        <button class="primary" id="saveEntry">Spara</button>
       </div>
     </form>
     <div id="flash"></div>
@@ -149,6 +154,7 @@ function renderCount() {
   $('#cancelEntry').onclick = closeEntry;
   $('#entry').onsubmit = (e) => { e.preventDefault(); saveEntry(); };
   $('#switch').onclick = () => { stopScanner(); prefs.sessionId = null; savePrefs(); session = null; $('#title').textContent = 'Inventering'; chooseSession(); };
+  $('#qty').addEventListener('focus', (e) => e.target.select());
   $('#code').focus(); // Handskannrar i tangentbordsläge skriver hit och skickar Enter.
   loadMyLines();
 }
@@ -186,26 +192,48 @@ function found(a, code, source) {
   buzz(60);
   if (!a.isStockItem) return showMsg($('#results'), `${a.articleNo} ${a.name} är inte en lagerartikel.`, 'warn');
   if (prefs.quickMode && source === 'scan') {
-    addLine(a, code, 1, '');
-    flash(`+1 ${a.articleNo} ${a.name}`);
+    const line = addLine(a, code, 1, '');
+    flash(`+1 ${a.articleNo} ${a.name}`, () => openEntry({ article: a, code, edit: line }));
     return;
   }
-  current = { article: a, code };
-  pauseScanner();
-  $('#artName').textContent = `${a.articleNo} – ${a.name}`;
-  $('#artMeta').textContent = [a.ean ? `EAN ${a.ean}` : 'Ingen EAN', a.unit].filter(Boolean).join(' · ');
-  $('#qty').value = '';
-  $('#comment').value = '';
-  $('#entry').classList.remove('hidden');
-  $('#qty').focus();
+  openEntry({ article: a, code });
 }
 
-function saveEntry() {
-  const qty = parseFloat($('#qty').value.replace(',', '.'));
+/** Öppnar antalsformuläret – för ny rad, eller för att ändra en befintlig (current.edit). */
+function openEntry(c) {
+  current = c;
+  pauseScanner();
+  const a = c.article;
+  $('#artName').textContent = `${a.articleNo} – ${a.name ?? ''}`;
+  $('#artMeta').textContent = c.edit ? 'Ändra antal'
+    : [a.ean ? `EAN ${a.ean}` : 'Ingen EAN', a.unit].filter(Boolean).join(' · ');
+  $('#qty').value = c.edit ? c.edit.quantity : 1;
+  $('#comment').value = c.edit?.comment ?? '';
+  $('#saveEntry').textContent = c.edit ? 'Spara ändring' : 'Spara';
+  $('#entry').classList.remove('hidden');
+  $('#entry').scrollIntoView({ block: 'nearest' });
+  $('#qty').focus();
+  $('#qty').select();
+}
+
+async function saveEntry() {
+  const qty = parseFloat(String($('#qty').value).replace(',', '.'));
   if (!Number.isFinite(qty) || qty < 0) return $('#qty').focus();
-  addLine(current.article, current.code, qty, $('#comment').value);
-  flash(`Sparat: ${fmt(qty)} × ${current.article.articleNo} ${current.article.name}`);
+  const comment = $('#comment').value.trim() || null;
+  const { article, code, edit } = current;
+  if (edit) {
+    // Ej skickad rad ändras i kön; skickad rad ändras på servern.
+    if (!queue.update(edit.id, { quantity: qty, comment })) {
+      try { await api('PATCH', `/api/sessions/${session.id}/lines/${edit.id}`, { quantity: qty, comment }); }
+      catch (e) { return showMsg($('#flash'), e.message); }
+    }
+    flash(`Ändrat: ${fmt(qty)} × ${article.articleNo} ${article.name ?? ''}`);
+  } else {
+    addLine(article, code, qty, comment);
+    flash(`Sparat: ${fmt(qty)} × ${article.articleNo} ${article.name}`);
+  }
   closeEntry();
+  loadMyLines();
 }
 
 function closeEntry() {
@@ -215,18 +243,22 @@ function closeEntry() {
 }
 
 function addLine(a, code, qty, comment) {
-  queue.add({
+  const line = {
     id: crypto.randomUUID(), sessionId: session.id, articleNo: a.articleNo, name: a.name, scannedCode: code,
     quantity: qty, location: prefs.location || null, comment: comment || null,
     countedAt: new Date().toISOString(), deviceId,
-  });
+  };
+  queue.add(line);
   flush();
+  return line;
 }
 
-function flash(text) {
-  showMsg($('#flash'), text, 'ok');
+function flash(text, onEdit) {
+  const el = $('#flash');
+  el.innerHTML = `<div class="msg ok row"><span>${esc(text)}</span>${onEdit ? '<button class="small shrink" id="flashEdit">Ändra antal</button>' : ''}</div>`;
+  if (onEdit) $('#flashEdit').onclick = () => { el.innerHTML = ''; onEdit(); };
   clearTimeout(flash.t);
-  flash.t = setTimeout(() => showMsg($('#flash'), ''), 3000);
+  flash.t = setTimeout(() => { el.innerHTML = ''; }, onEdit ? 6000 : 3000);
 }
 
 async function loadMyLines() {
@@ -237,9 +269,15 @@ async function loadMyLines() {
   try { lines = await api('GET', `/api/sessions/${session.id}/mylines`); } catch { /* offline */ }
   const total = lines.length + pending.length;
   el.innerHTML = total === 0 ? '<li class="muted">Inga rader ännu.</li>' :
-    pending.map((l) => `<li><div class="grow"><b>${esc(l.articleNo)}</b> ${esc(l.name)}<div class="muted">Väntar på att skickas${l.location ? ' · ' + esc(l.location) : ''}</div></div><span class="num">${fmt(l.quantity)}</span></li>`).join('') +
-    lines.map((l) => `<li><div class="grow"><b>${esc(l.articleNo)}</b> ${esc(l.name)}<div class="muted">${fmtTime(l.countedAt)}${l.location ? ' · ' + esc(l.location) : ''}${l.comment ? ' · ' + esc(l.comment) : ''}</div></div>
-      <span class="num">${fmt(l.quantity)}</span><button class="small danger shrink" data-id="${l.id}" aria-label="Ta bort">✕</button></li>`).join('');
+    pending.map((l) => `<li data-edit="${l.id}" data-pending="1"><div class="grow"><b>${esc(l.articleNo)}</b> ${esc(l.name)}<div class="muted">Väntar på att skickas${l.location ? ' · ' + esc(l.location) : ''}</div></div><button class="small shrink qtybtn">${fmt(l.quantity)} ✎</button></li>`).join('') +
+    lines.map((l) => `<li data-edit="${l.id}"><div class="grow"><b>${esc(l.articleNo)}</b> ${esc(l.name)}<div class="muted">${fmtTime(l.countedAt)}${l.location ? ' · ' + esc(l.location) : ''}${l.comment ? ' · ' + esc(l.comment) : ''}</div></div>
+      <button class="small shrink qtybtn">${fmt(l.quantity)} ✎</button><button class="small danger shrink" data-id="${l.id}" aria-label="Ta bort">✕</button></li>`).join('');
+  const all = [...pending, ...lines];
+  el.querySelectorAll('li[data-edit]').forEach((li) => li.onclick = (e) => {
+    if (e.target.closest('button[data-id]')) return;
+    const l = all.find((x) => x.id === li.dataset.edit);
+    openEntry({ article: { articleNo: l.articleNo, name: l.name }, code: l.scannedCode, edit: { id: l.id, quantity: l.quantity, comment: l.comment } });
+  });
   el.querySelectorAll('button[data-id]').forEach((b) => b.onclick = async () => {
     if (!confirm('Ta bort raden?')) return;
     try { await api('DELETE', `/api/sessions/${session.id}/lines/${b.dataset.id}`); loadMyLines(); }

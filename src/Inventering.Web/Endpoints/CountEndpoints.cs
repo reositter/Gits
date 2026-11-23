@@ -7,6 +7,8 @@ namespace Inventering.Web.Endpoints;
 
 public record LineDto(Guid Id, string ArticleNo, string? ScannedCode, decimal Quantity, string? Location, string? Comment, DateTimeOffset? CountedAt, string? DeviceId);
 
+public record EditLineRequest(decimal Quantity, string? Comment);
+
 public static class CountEndpoints
 {
     public static object ArticleDto(Article a) => new { a.ArticleNo, a.Name, a.Ean, a.Unit, a.IsStockItem };
@@ -76,6 +78,30 @@ public static class CountEndpoints
             {
                 l.Id, l.ArticleNo, name = cache.Get(l.ArticleNo)?.Name, l.Quantity, l.Location, l.Comment, l.CountedAt,
             });
+        });
+
+        // Ändra antal på en egen rad. Den gamla raden stryks och en ny skapas → full spårbarhet.
+        g.MapPatch("/sessions/{id:int}/lines/{lineId:guid}", async (int id, Guid lineId, EditLineRequest req, AppDb db, HttpContext http) =>
+        {
+            var line = await db.Lines.FirstOrDefaultAsync(l => l.Id == lineId && l.SessionId == id);
+            var session = await db.Sessions.FindAsync(id);
+            if (line is null || session is null) return Results.NotFound();
+            if (line.UserId != http.User.RequiredUserId()) return Results.Forbid();
+            if (session.Status != SessionStatus.Open) return Results.Json(new { error = "Inventeringen är stängd." }, statusCode: 409);
+            if (line.IsVoided) return Results.Json(new { error = "Raden är redan ändrad eller borttagen." }, statusCode: 409);
+            if (req.Quantity < 0 || req.Quantity > 1_000_000) return Results.BadRequest(new { error = "Ogiltigt antal." });
+
+            var now = DateTimeOffset.UtcNow;
+            line.IsVoided = true; line.VoidedAt = now; line.VoidedByUserId = line.UserId;
+            var copy = new CountLine
+            {
+                Id = Guid.NewGuid(), SessionId = id, UserId = line.UserId, DeviceId = line.DeviceId,
+                ArticleNo = line.ArticleNo, ScannedCode = line.ScannedCode, Quantity = req.Quantity,
+                Location = line.Location, Comment = req.Comment ?? line.Comment, CountedAt = line.CountedAt,
+            };
+            db.Lines.Add(copy);
+            await db.SaveChangesAsync();
+            return Results.Ok(new { copy.Id });
         });
 
         // Räknaren kan ångra egna rader så länge inventeringen är öppen.

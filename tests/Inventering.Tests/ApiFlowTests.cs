@@ -78,7 +78,12 @@ public class ApiFlowTests : IDisposable
         await Json(await anna.PostAsJsonAsync($"/api/sessions/{sid}/lines", lines1));
         // Omsändning (offline-kö) ska inte dubblera
         await Json(await anna.PostAsJsonAsync($"/api/sessions/{sid}/lines", lines1));
-        await Json(await bo.PostAsJsonAsync($"/api/sessions/{sid}/lines", new[] { new { id = Guid.NewGuid(), articleNo = "1001", quantity = 8m, location = "B4" } }));
+        var boLine = Guid.NewGuid();
+        await Json(await bo.PostAsJsonAsync($"/api/sessions/{sid}/lines", new[] { new { id = boLine, articleNo = "1001", quantity = 5m, location = "B4" } }));
+        // Bo ändrar sitt antal 5 → 8; Anna får inte ändra Bos rad
+        Assert.Equal(HttpStatusCode.Forbidden, (await anna.PatchAsJsonAsync($"/api/sessions/{sid}/lines/{boLine}", new { quantity = 1m })).StatusCode);
+        await Json(await bo.PatchAsJsonAsync($"/api/sessions/{sid}/lines/{boLine}", new { quantity = 8m }));
+        Assert.Equal(HttpStatusCode.Conflict, (await bo.PatchAsJsonAsync($"/api/sessions/{sid}/lines/{boLine}", new { quantity = 9m })).StatusCode);
 
         // Kan inte skicka öppen inventering
         Assert.Equal(HttpStatusCode.Conflict, (await admin.PostAsJsonAsync($"/api/admin/sessions/{sid}/send", new { confirm = true })).StatusCode);

@@ -73,3 +73,5 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
 .qr img { display: block; }
 code { font-family: ui-monospace, Consolas, monospace; word-break: break-all; }
 .badge { font-size: 13px; padding: 4px 10px; border-radius: 99px; background: var(--warn-bg); color: var(--warn); }
+.qtybtn { min-width: 72px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.list li[data-edit] { cursor: pointer; }
