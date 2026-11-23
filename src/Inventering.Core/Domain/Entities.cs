@@ -29,9 +29,36 @@ public class User
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
+/// <summary>Ett bolag (företag) i Visma Administration som tjänsten kan inventera.</summary>
+public class Company
+{
+    public int Id { get; set; }
+    /// <summary>Användarvänligt namn som visas i appen, t.ex. "Bygg AB – Lager Göteborg".</summary>
+    public string Name { get; set; } = "";
+    /// <summary>Företagsmappen i Visma, t.ex. C:\ProgramData\SPCS\SPCS Administration\Företag\FTG1.</summary>
+    public string CompanyPath { get; set; } = "";
+    /// <summary>Namnet som det står i Visma (informativt).</summary>
+    public string? VismaName { get; set; }
+    /// <summary>Visma-användare om inloggning är aktiverad i Visma för bolaget.</summary>
+    public string? VismaUser { get; set; }
+    /// <summary>Krypterat med DataProtection – aldrig i klartext i databasen.</summary>
+    public string? VismaPasswordProtected { get; set; }
+    public bool IsActive { get; set; } = true;
+    public int SortOrder { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>Begränsar vilka bolag en användare får jobba i. Inga rader = alla bolag.</summary>
+public class UserCompany
+{
+    public int UserId { get; set; }
+    public int CompanyId { get; set; }
+}
+
 /// <summary>En artikel som den ser ut i Visma, cachad lokalt för snabb skanning.</summary>
 public class Article
 {
+    public int CompanyId { get; set; }
     public string ArticleNo { get; set; } = "";
     public string Name { get; set; } = "";
     /// <summary>EAN/streckkod. Saknas på vissa artiklar.</summary>
@@ -46,6 +73,7 @@ public class Article
 public class InventorySession
 {
     public int Id { get; set; }
+    public int CompanyId { get; set; }
     public string Name { get; set; } = "";
     public SessionStatus Status { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
@@ -130,6 +158,7 @@ public class AuditEntry
     public long Id { get; set; }
     public DateTimeOffset At { get; set; } = DateTimeOffset.UtcNow;
     public int? UserId { get; set; }
+    public int? CompanyId { get; set; }
     public string Action { get; set; } = "";
     public string? Details { get; set; }
     public string? RemoteIp { get; set; }

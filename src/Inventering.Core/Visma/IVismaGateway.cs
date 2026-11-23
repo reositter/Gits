@@ -29,3 +29,14 @@ public interface IVismaGateway
     /// <summary>Skriver inventerat antal (absolut värde) per artikel. Ett anrop per inventering.</summary>
     Task<IReadOnlyList<InventoryWriteResult>> WriteInventoryAsync(IReadOnlyList<InventoryWrite> rows, string reference, CancellationToken ct = default);
 }
+
+/// <summary>Ett bolag som hittats i Visma Administration.</summary>
+public record VismaCompanyInfo(string Name, string Directory, string FullPath, string? DatabaseName);
+
+/// <summary>Skapar en gateway per bolag och hittar vilka bolag som finns i Visma.</summary>
+public interface IVismaGatewayFactory
+{
+    string Mode { get; }
+    IVismaGateway For(Company company);
+    Task<IReadOnlyList<VismaCompanyInfo>> DiscoverCompaniesAsync(CancellationToken ct = default);
+}

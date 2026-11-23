@@ -32,6 +32,12 @@ namespace Inventering.AdkBridge
                 var req = JsonSerializer.Deserialize<BridgeRequest>(input, Json)
                           ?? throw new InvalidOperationException("Tom begäran.");
                 object result;
+                // Bolagslistan kräver inget öppnat bolag.
+                if (string.Equals(req.Command, "companies", StringComparison.OrdinalIgnoreCase))
+                {
+                    Console.Out.Write(JsonSerializer.Serialize(Companies(req), Json));
+                    return 0;
+                }
                 using (var company = Open(req))
                 {
                     switch ((req.Command ?? "").ToLowerInvariant())
@@ -67,6 +73,17 @@ namespace Inventering.AdkBridge
             if (string.IsNullOrWhiteSpace(req.CompanyPath)) throw new InvalidOperationException("Företagssökväg saknas (Visma:Adk:CompanyPath).");
             if (!Directory.Exists(req.CompanyPath)) throw new DirectoryNotFoundException("Företagsmappen finns inte: " + req.CompanyPath);
             return new AvCompany(req.CompanyPath, req.CommonPath ?? "", req.User ?? "", req.Password ?? "");
+        }
+
+        private static List<CompanyDto> Companies(BridgeRequest req)
+        {
+            var list = string.IsNullOrWhiteSpace(req.CommonPath)
+                ? AvCompany.GetAvailableCompanies()
+                : AvCompany.GetAvailableCompanies(req.CommonPath, 0);
+            return list.Select(c => new CompanyDto
+            {
+                Name = c.Name, Directory = c.Directory, DirectoryFullPath = c.DirectoryFullPath, DatabaseName = c.DatabaseName,
+            }).ToList();
         }
 
         private static StatusDto Status(string companyPath)

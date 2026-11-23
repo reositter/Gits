@@ -9,6 +9,10 @@ namespace Inventering.Web.Services;
 public static class Claims
 {
     public const string Mfa = "mfa";
+    public const string Company = "company";
+    /// <summary>Valt bolag (sätts när användaren väljer bolag efter inloggning).</summary>
+    public static int? CompanyId(this ClaimsPrincipal p) =>
+        int.TryParse(p.FindFirstValue(Company), out var id) ? id : null;
     public static int? UserId(this ClaimsPrincipal p) =>
         int.TryParse(p.FindFirstValue(ClaimTypes.NameIdentifier), out var id) ? id : null;
     public static int RequiredUserId(this ClaimsPrincipal p) => p.UserId() ?? throw new UnauthorizedAccessException();

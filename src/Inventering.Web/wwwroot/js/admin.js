@@ -19,9 +19,11 @@ async function start() {
 
 function go(tab) { location.hash = tab; }
 function route() {
-  const [tab, id] = (location.hash.slice(1) || 'sessions').split('/');
+  let [tab, id] = (location.hash.slice(1) || 'sessions').split('/');
+  // Utan valt bolag finns bara de bolagsoberoende flikarna.
+  if (!me.company && !['companies', 'users', 'audit'].includes(tab)) tab = 'companies';
   $('#tabs').querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
-  const r = { sessions: () => id ? sessionView(Number(id)) : sessionsView(), barcodes: barcodesView, users: usersView, audit: auditView }[tab] ?? sessionsView;
+  const r = { sessions: () => id ? sessionView(Number(id)) : sessionsView(), barcodes: barcodesView, companies: companiesView, users: usersView, audit: auditView }[tab] ?? sessionsView;
   r().catch((e) => showMsg(main, e.message));
 }
 
@@ -31,8 +33,8 @@ async function sessionsView() {
   const active = sessions.some((s) => s.status === 'Open' || s.status === 'Locked');
   main.innerHTML = `
     <div class="card">
-      <h2>Visma</h2>
-      <p class="muted">Koppling: <b>${esc(status.visma)}</b> · ${status.articles} artiklar i cache · senast uppdaterad ${fmtTime(status.lastRefresh) || 'aldrig'}</p>
+      <h2>${esc(status.company.name)}</h2>
+      <p class="muted">Visma-mapp: <code>${esc(status.company.companyPath)}</code> · ${status.articles} artiklar i cache · senast uppdaterad ${fmtTime(status.lastRefresh) || 'aldrig'}</p>
       ${status.lastError ? `<div class="msg bad">Senaste fel: ${esc(status.lastError)}</div>` : ''}
       <button id="refresh" class="small">Uppdatera artiklar från Visma</button>
       <button id="checkVisma" class="small">Kontrollera Visma</button> <span id="rmsg"></span>
@@ -264,7 +266,7 @@ async function barcodesView() {
         <tbody>${rules.map((r, i) => `<tr><td class="row" style="gap:2px">
             <button class="small shrink" data-mv="${r.id}" data-dir="up" ${i === 0 ? 'disabled' : ''}>↑</button>
             <button class="small shrink" data-mv="${r.id}" data-dir="down" ${i === rules.length - 1 ? 'disabled' : ''}>↓</button></td>
-          <td><b>${esc(r.name)}</b>${r.description ? `<div class="muted">${esc(r.description)}</div>` : ''}</td>
+          <td><b>${esc(r.name)}</b> ${r.companyId == null ? '<span class="pill">Alla bolag</span>' : ''}${r.description ? `<div class="muted">${esc(r.description)}</div>` : ''}</td>
           <td>${r.type === 1 || r.type === 'Gs1' ? 'GS1' : 'Regex'}</td><td><code>${esc(r.pattern)}</code></td>
           <td class="n">${r.quantityDecimals}</td><td class="n">${fmt(r.quantityMultiplier)}</td><td>${r.isActive ? 'Ja' : 'Nej'}</td>
           <td class="row" style="justify-content:flex-end"><button class="small shrink" data-edit="${r.id}">Ändra</button><button class="small shrink danger" data-del="${r.id}">Ta bort</button></td></tr>`).join('')
@@ -276,7 +278,7 @@ async function barcodesView() {
       </div>
     </div>
     <div class="card">
-      <h2>Extra streckkoder</h2>
+      <h2>Extra streckkoder – ${esc(me.company?.name)}</h2>
       <p class="muted">Visma har en streckkod per artikel. Här kan fler läggas till, t.ex. kartong-EAN som motsvarar 12 st.</p>
       <form id="af" class="row" style="flex-wrap:wrap" autocomplete="off">
         <input id="acode" placeholder="Streckkod" required>
@@ -348,6 +350,7 @@ function ruleDialog(rule) {
       <p class="muted">Exempel: vikt i gram med 3 decimaler → kg. Multiplikator 12 = varje skanning är 12 st.</p>
       <label>Beskrivning</label><input id="rdesc" value="${esc(r.description)}">
       <label class="row" style="color:var(--text)"><input type="checkbox" id="ra" style="width:auto;flex:0" ${r.isActive ? 'checked' : ''}> Aktiv</label>
+      <label class="row" style="color:var(--text)"><input type="checkbox" id="rall" style="width:auto;flex:0" ${rule?.id && rule.companyId == null ? 'checked' : ''}> Gäller alla bolag (annars bara ${esc(me.company?.name)})</label>
       <label>Testa regeln</label>
       <div class="row"><input id="rtest" placeholder="Exempelkod"><button type="button" class="shrink" id="rtestBtn">Testa</button></div>
       <div id="rmsg"></div>
@@ -359,7 +362,7 @@ function ruleDialog(rule) {
   const body = () => ({
     name: $('#rn', dlg).value, type: $('#rt', dlg).value, pattern: $('#rp', dlg).value,
     quantityDecimals: Number($('#rd', dlg).value || 0), quantityMultiplier: Number($('#rm', dlg).value || 1),
-    isActive: $('#ra', dlg).checked, description: $('#rdesc', dlg).value,
+    isActive: $('#ra', dlg).checked, description: $('#rdesc', dlg).value, allCompanies: $('#rall', dlg).checked,
   });
   $('#rcancel', dlg).onclick = () => dlg.close();
   $('#rtestBtn', dlg).onclick = async () => {
@@ -376,9 +379,109 @@ function ruleDialog(rule) {
   };
 }
 
+// ---------- Bolag ----------
+async function companiesView() {
+  const companies = await api('GET', '/api/admin/companies');
+  main.innerHTML = `
+    <div class="card">
+      <h2>Bolag</h2>
+      <p class="muted">Varje bolag är ett företag i Visma Administration. Ge dem namn som användarna känner igen – mappen (FTG1, FTG2 …) syns bara här.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Namn i appen</th><th>Namn i Visma</th><th>Mapp</th><th class="n">Artiklar</th><th>Uppdaterad</th><th>Aktiv</th><th></th></tr></thead>
+        <tbody>${companies.map((c) => `<tr>
+          <td><b>${esc(c.name)}</b>${me.company?.id === c.id ? ' <span class="pill Open">Valt</span>' : ''}</td>
+          <td>${esc(c.vismaName)}</td><td><code>${esc(c.companyPath)}</code></td>
+          <td class="n">${c.articles}</td><td>${fmtTime(c.lastRefresh)}${c.lastError ? `<div class="warn-text">⚠ ${esc(c.lastError)}</div>` : ''}</td>
+          <td>${c.isActive ? 'Ja' : 'Nej'}</td>
+          <td class="row" style="justify-content:flex-end">
+            <button class="small shrink" data-test="${c.id}">Testa</button>
+            <button class="small shrink" data-edit="${c.id}">Ändra</button></td></tr>`).join('')
+          || '<tr><td colspan="7" class="muted">Inga bolag ännu. Sök i Visma eller lägg till manuellt.</td></tr>'}</tbody>
+      </table></div>
+      <div id="cmsg"></div>
+      <div class="toolbar" style="margin-top:12px">
+        <button id="discover" class="primary">Sök bolag i Visma</button>
+        <button id="addCompany">Lägg till manuellt</button>
+      </div>
+      <div id="found"></div>
+    </div>`;
+
+  $('#addCompany').onclick = () => companyDialog(null);
+  main.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => companyDialog(companies.find((c) => c.id === Number(b.dataset.edit))));
+  main.querySelectorAll('[data-test]').forEach((b) => b.onclick = async () => {
+    b.disabled = true; showMsg($('#cmsg'), 'Testar kopplingen och läser artiklar…', 'warn');
+    try {
+      const r = await api('POST', `/api/admin/companies/${b.dataset.test}/test`);
+      showMsg($('#cmsg'), `OK: ${r.status.details ?? r.status.name} · ${r.articles} artiklar` +
+        (r.status.writesToInventoryList ? ` · inventeringsunderlag: ${r.status.inventoryListRows || 'saknas'}` : ''), 'ok');
+    } catch (e) { showMsg($('#cmsg'), e.message); }
+    b.disabled = false;
+  });
+  $('#discover').onclick = async () => {
+    $('#found').innerHTML = '<p class="muted">Söker…</p>';
+    try {
+      const found = await api('GET', '/api/admin/companies/discover');
+      $('#found').innerHTML = `<h2 style="margin-top:16px">Hittade i Visma</h2><div class="table-wrap"><table>
+        <thead><tr><th>Namn i Visma</th><th>Mapp</th><th>Databas</th><th></th></tr></thead>
+        <tbody>${found.map((f, i) => `<tr><td>${esc(f.name)}</td><td><code>${esc(f.fullPath)}</code></td><td>${esc(f.databaseName)}</td>
+          <td>${f.registered ? '<span class="muted">Registrerat</span>' : `<button class="small primary" data-add="${i}">Lägg till</button>`}</td></tr>`).join('')
+          || '<tr><td colspan="4" class="muted">Inga bolag hittades.</td></tr>'}</tbody></table></div>`;
+      $('#found').querySelectorAll('[data-add]').forEach((b) => b.onclick = () => {
+        const f = found[b.dataset.add];
+        companyDialog({ name: f.name && f.name !== f.directory ? f.name : '', companyPath: f.fullPath, vismaName: f.name, isActive: true, sortOrder: companies.length + 1 }, f.directory);
+      });
+    } catch (e) { showMsg($('#found'), e.message); }
+  };
+}
+
+function companyDialog(c, directory) {
+  const isNew = !c?.id;
+  c ??= { name: '', companyPath: '', vismaName: '', isActive: true, sortOrder: 0 };
+  dlg.innerHTML = `
+    <form id="cf" autocomplete="off">
+      <h2>${isNew ? 'Lägg till bolag' : 'Ändra bolag'}</h2>
+      <label>Namn i appen (visas för användarna)</label>
+      <input id="cn" value="${esc(c.name)}" placeholder="t.ex. Bygg AB – Lager Göteborg" required>
+      ${directory ? `<p class="muted">Mappen heter <b>${esc(directory)}</b> i Visma${c.vismaName && c.vismaName !== directory ? `, bolagsnamn: <b>${esc(c.vismaName)}</b>` : ''}.</p>` : ''}
+      <label>Företagsmapp i Visma</label>
+      <input id="cp" value="${esc(c.companyPath)}" placeholder="C:\\ProgramData\\SPCS\\SPCS Administration\\Företag\\FTG1" required style="font-family:ui-monospace,Consolas,monospace">
+      <label>Visma-användare (om inloggning är aktiverad i Visma)</label>
+      <input id="cu" value="${esc(c.vismaUser ?? '')}" autocomplete="off">
+      <label>Visma-lösenord ${c.hasPassword ? '(sparat – lämna tomt för att behålla)' : ''}</label>
+      <input id="cpw" type="password" autocomplete="new-password">
+      ${c.hasPassword ? `<label class="row" style="color:var(--text)"><input type="checkbox" id="cclr" style="width:auto;flex:0"> Ta bort sparat lösenord</label>` : ''}
+      <div class="row">
+        <div><label>Sorteringsordning</label><input id="cs" type="number" value="${c.sortOrder ?? 0}"></div>
+        <label class="row" style="color:var(--text);margin-top:28px"><input type="checkbox" id="ca" style="width:auto;flex:0" ${c.isActive ? 'checked' : ''}> Aktivt</label>
+      </div>
+      <div id="cdmsg"></div>
+      <div class="row" style="margin-top:12px"><button type="button" id="ccancel">Avbryt</button><button class="primary">Spara</button></div>
+    </form>`;
+  dlg.showModal();
+  $('#cn', dlg).focus();
+  $('#ccancel', dlg).onclick = () => dlg.close();
+  $('#cf', dlg).onsubmit = async (e) => {
+    e.preventDefault();
+    const body = {
+      name: $('#cn', dlg).value, companyPath: $('#cp', dlg).value, vismaName: c.vismaName ?? null,
+      vismaUser: $('#cu', dlg).value, vismaPassword: $('#cpw', dlg).value || null, clearPassword: $('#cclr', dlg)?.checked ?? false,
+      isActive: $('#ca', dlg).checked, sortOrder: Number($('#cs', dlg).value || 0),
+    };
+    try {
+      if (isNew) await api('POST', '/api/admin/companies', body);
+      else await api('PUT', `/api/admin/companies/${c.id}`, body);
+      dlg.close();
+      // Första bolaget: välj det direkt.
+      if (!me.company) { location.reload(); return; }
+      companiesView();
+    } catch (err) { showMsg($('#cdmsg', dlg), err.message); }
+  };
+}
+
 // ---------- Användare ----------
 async function usersView() {
-  const users = await api('GET', '/api/admin/users');
+  const [users, companies] = await Promise.all([api('GET', '/api/admin/users'), api('GET', '/api/admin/companies')]);
+  const cname = (id) => companies.find((c) => c.id === id)?.name ?? `#${id}`;
   main.innerHTML = `
     <div class="card">
       <h2>Ny användare</h2>
@@ -386,14 +489,17 @@ async function usersView() {
         <input id="un" placeholder="Användarnamn" required autocapitalize="none">
         <input id="dn" placeholder="Namn">
         <select id="ur" class="shrink" style="width:auto"><option value="Counter">Räknare</option><option value="Admin">Admin</option></select>
+        <select id="uc" class="shrink" style="width:auto"><option value="">Alla bolag</option>${companies.map((c) => `<option value="${c.id}">Bara ${esc(c.name)}</option>`).join('')}</select>
         <button class="primary shrink">Skapa</button>
       </form>
       <p class="muted">Ett lösenord genereras och visas en gång.</p>
       <div id="umsg"></div>
     </div>
     <div class="card"><h2>Användare</h2><div class="table-wrap"><table>
-      <thead><tr><th>Användarnamn</th><th>Namn</th><th>Roll</th><th>Tvåfaktor</th><th>Status</th><th></th></tr></thead>
+      <thead><tr><th>Användarnamn</th><th>Namn</th><th>Roll</th><th>Bolag</th><th>Tvåfaktor</th><th>Status</th><th></th></tr></thead>
       <tbody>${users.map((u) => `<tr><td>${esc(u.userName)}</td><td>${esc(u.displayName)}</td><td>${u.role === 'Admin' ? 'Admin' : 'Räknare'}</td>
+        <td>${u.role === 'Admin' || !u.companyIds.length ? '<span class="muted">Alla</span>' : esc(u.companyIds.map(cname).join(', '))}
+          ${u.role !== 'Admin' ? `<button class="small" data-comp="${u.id}">Ändra</button>` : ''}</td>
         <td>${u.totpEnabled ? 'Ja' : 'Nej'}</td><td>${u.isActive ? (u.locked ? '<span class="neg">Spärrad</span>' : 'Aktiv') : '<span class="muted">Inaktiv</span>'}</td>
         <td class="row" style="justify-content:flex-end">
           <button class="small shrink" data-pw="${u.id}">Nytt lösenord</button>
@@ -411,7 +517,7 @@ async function usersView() {
   $('#uf').onsubmit = async (e) => {
     e.preventDefault();
     try {
-      const r = await api('POST', '/api/admin/users', { userName: $('#un').value, displayName: $('#dn').value, role: $('#ur').value });
+      const r = await api('POST', '/api/admin/users', { userName: $('#un').value, displayName: $('#dn').value, role: $('#ur').value, companyIds: $('#uc').value ? [Number($('#uc').value)] : [] });
       await usersView();
       showMsg($('#umsg'), `Användaren skapad. Lösenord: ${r.password}  (visas bara nu)`, 'ok');
     } catch (err) { showMsg($('#umsg'), err.message); }
@@ -428,6 +534,21 @@ async function usersView() {
     await api('POST', `/api/admin/users/${b.dataset.totp}/reset-totp`); usersView();
   });
   main.querySelectorAll('[data-role]').forEach((b) => b.onclick = () => put(b.dataset.role, { userName: '', role: b.dataset.to }));
+  main.querySelectorAll('[data-comp]').forEach((b) => b.onclick = () => {
+    const u = users.find((x) => x.id === Number(b.dataset.comp));
+    dlg.innerHTML = `<form id="cf"><h2>Bolag för ${esc(u.userName)}</h2>
+      <p class="muted">Inget markerat = alla bolag.</p>
+      ${companies.map((c) => `<label class="row" style="color:var(--text)"><input type="checkbox" value="${c.id}" style="width:auto;flex:0" ${u.companyIds.includes(c.id) ? 'checked' : ''}> ${esc(c.name)}</label>`).join('')}
+      <div class="row" style="margin-top:12px"><button type="button" id="cc">Avbryt</button><button class="primary">Spara</button></div></form>`;
+    dlg.showModal();
+    $('#cc', dlg).onclick = () => dlg.close();
+    $('#cf', dlg).onsubmit = async (e) => {
+      e.preventDefault();
+      const ids = [...dlg.querySelectorAll('input[type=checkbox]:checked')].map((x) => Number(x.value));
+      dlg.close();
+      await put(u.id, { userName: '', role: '', companyIds: ids });
+    };
+  });
   main.querySelectorAll('[data-act]').forEach((b) => b.onclick = () => put(b.dataset.act, { userName: '', role: '', isActive: b.dataset.to === 'true' }));
   $('#pf').onsubmit = async (e) => {
     e.preventDefault();
@@ -445,8 +566,8 @@ function genPassword() {
 async function auditView() {
   const rows = await api('GET', '/api/admin/audit');
   main.innerHTML = `<div class="card"><h2>Händelselogg (senaste 500)</h2><div class="table-wrap"><table>
-    <thead><tr><th>Tid</th><th>Användare</th><th>Händelse</th><th>Detaljer</th><th>IP</th></tr></thead>
-    <tbody>${rows.map((r) => `<tr><td>${fmtTime(r.at)}</td><td>${esc(r.user)}</td><td>${esc(r.action)}</td><td>${esc(r.details)}</td><td>${esc(r.remoteIp)}</td></tr>`).join('')}</tbody>
+    <thead><tr><th>Tid</th><th>Användare</th><th>Bolag</th><th>Händelse</th><th>Detaljer</th><th>IP</th></tr></thead>
+    <tbody>${rows.map((r) => `<tr><td>${fmtTime(r.at)}</td><td>${esc(r.user)}</td><td>${esc(r.company)}</td><td>${esc(r.action)}</td><td>${esc(r.details)}</td><td>${esc(r.remoteIp)}</td></tr>`).join('')}</tbody>
   </table></div></div>`;
 }
 

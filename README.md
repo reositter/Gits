@@ -12,6 +12,7 @@ till Visma Administration via ADK. Bakgrund och designbeslut finns i [docs/ARKIT
 | Flera mobiler samtidigt, summering per artikel, varningar | Klar |
 | Admin: starta/låsa/granska/stryka rader/korrigera/skicka, CSV-export | Klar |
 | Inloggning, roller, kontospärr, TOTP-tvåfaktor, händelselogg | Klar |
+| Flera bolag (FTG1, FTG2 …) med egna namn, bolagsval vid inloggning, behörighet per användare | Klar |
 | Streckkodsregler per kund (regex, GS1-128/DataMatrix) och extra streckkoder (t.ex. kartong = 12 st) | Klar |
 | Signerad inlämning per användare, kontrollsumma, spårbarhet på radnivå | Klar |
 | Koppling mot Visma via ADK (AvSynkLib), läser artiklar och skriver till inventeringsunderlaget | Byggd, **ej testad mot riktig Visma** |
@@ -75,9 +76,8 @@ admin-sidan syns om underlaget finns.
    Kopiera även `lib\*.dll` till `C:\Inventering\AdkBridge` om de inte kom med.
 3. Ställ in `C:\Inventering\appsettings.json`:
    - `Visma:Mode` = `Adk`
-   - `Visma:Adk:CompanyPath` = företagsmappen, t.ex. `...\Företag\FTG3`
-   - `Visma:Adk:User` och `Password` om inloggning är aktiverad i Visma
    - HTTPS, se nedan
+   - Bolagen läggs upp i admin under **Bolag** efter start.
 3. Installera och starta som tjänst (kör som administratör):
    ```
    sc.exe create Inventering binPath= "C:\Inventering\Inventering.Web.exe" start= delayed-auto
@@ -111,6 +111,32 @@ Utan HTTPS fungerar sökfältet och handskannrar i tangentbordsläge, men inte k
 
 Lägg in en länk eller integrationspost, enligt befintligt upplägg med `dynamic.xml`, som öppnar
 `https://inventering.foretaget.se/admin.html` i webbläsaren.
+
+## Flera bolag
+
+Admin → **Bolag**:
+- **Sök bolag i Visma** listar alla företag som ADK hittar (`AvCompany.GetAvailableCompanies`).
+  Klicka **Lägg till** och ge bolaget ett namn som användarna känner igen, t.ex.
+  "Bygg AB – Lager Göteborg" i stället för FTG3.
+- Det går också att lägga till bolag manuellt med företagsmappen.
+- Visma-användare och lösenord anges per bolag om inloggning är aktiverad i Visma. Lösenordet
+  krypteras med DataProtection och lagras aldrig i klartext.
+- **Testa** loggar in mot bolaget och läser in artiklarna.
+
+Efter inloggning väljer användaren bolag i en lista. Har användaren bara ett bolag väljs det
+automatiskt. Det valda bolaget visas i sidhuvudet och kan bytas där. Under Admin → Användare kan
+en räknare begränsas till vissa bolag, och utan begränsning har räknaren tillgång till alla.
+
+Varje bolag har egna inventeringar, en egen artikelcache och egna extra streckkoder.
+Streckkodsregler kan gälla ett bolag eller alla bolag.
+
+## Snabb sökning och cache
+
+Skanning och sökning går **aldrig** mot Visma. ADK:s `Find` är långsam, så hela artikelregistret
+per bolag hålls i minnet med index på artikelnr och EAN, plus en förberäknad söktext för
+fritextsökning. Registret sparas även i SQLite så att det finns direkt vid omstart, även om Visma
+inte svarar. Det uppdateras i bakgrunden från Visma var 15:e minut (`Visma:ArticleRefreshMinutes`),
+när en inventering startas och skickas, och manuellt med en knapp i admin.
 
 ## Streckkoder
 
@@ -152,4 +178,5 @@ Regler kan testas innan de sparas.
 1. Testa ADK-bryggan mot ett **testföretag** i Visma. Kör först `status`, sedan `articles`, sedan
    `inventory-write` på några artiklar. Kontrollera underlaget i Visma.
 2. Ta fram certifikat och DNS-namn, och installera på servern.
-3. Gå över till EF Core-migreringar innan första produktionssättningen. Schemat skapas nu med `EnsureCreated`.
+3. Gå över till EF Core-migreringar innan första produktionssättningen. Schemat skapas nu med
+   `EnsureCreated`, så vid schemaändringar under utvecklingen måste `inventory.db` raderas.

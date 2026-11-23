@@ -13,6 +13,7 @@ namespace Inventering.Web.Endpoints;
 public record LoginRequest(string UserName, string Password, string? TotpCode);
 public record CodeRequest(string Code);
 public record ChangePasswordRequest(string CurrentPassword, string NewPassword);
+public record SelectCompanyRequest(int CompanyId);
 
 public static class AuthEndpoints
 {
@@ -73,7 +74,9 @@ public static class AuthEndpoints
             db.Log(http, "login.ok", user.UserName);
             await db.SaveChangesAsync();
 
-            await SignIn(http, user, mfa, o);
+            // Har användaren bara ett bolag väljs det direkt.
+            var companies = await CompanyService.ForUserAsync(db, user);
+            await SignIn(http, user, mfa, o, companies.Count == 1 ? companies[0].Id : null);
             return Results.Ok(new { ok = true, mustSetupTotp = MustSetupTotp(user, o) });
         }).RequireRateLimiting("login");
 
@@ -88,8 +91,12 @@ public static class AuthEndpoints
             var id = http.User.UserId();
             var user = id is null ? null : await db.Users.FindAsync(id.Value);
             if (user is null || !user.IsActive) return Results.Unauthorized();
+            var companies = await CompanyService.ForUserAsync(db, user);
+            var current = companies.FirstOrDefault(c => c.Id == http.User.CompanyId());
             return Results.Ok(new
             {
+                company = current is null ? null : new { current.Id, current.Name },
+                companies = companies.Select(c => new { c.Id, c.Name }),
                 user.Id, user.UserName, user.DisplayName,
                 role = user.Role.ToString(),
                 totpEnabled = user.TotpSecret != null,
@@ -124,8 +131,22 @@ public static class AuthEndpoints
             db.Log(http, "totp.enabled", user.UserName);
             await db.SaveChangesAsync();
             http.Response.Cookies.Delete("totp_pending");
-            await SignIn(http, user, true, opt.Value);
+            await SignIn(http, user, true, opt.Value, http.User.CompanyId());
             return Results.Ok(new { ok = true });
+        }).RequireAuthorization();
+
+        // Välj bolag att jobba i. Sparas i inloggningscookien.
+        g.MapPost("/company", async (SelectCompanyRequest req, HttpContext http, AppDb db, IOptions<SecurityOptions> opt) =>
+        {
+            var user = await db.Users.FindAsync(http.User.RequiredUserId());
+            if (user is null) return Results.Unauthorized();
+            var companies = await CompanyService.ForUserAsync(db, user);
+            var company = companies.FirstOrDefault(c => c.Id == req.CompanyId);
+            if (company is null) return Results.Json(new { error = "Du har inte behörighet till bolaget." }, statusCode: 403);
+            await SignIn(http, user, http.User.HasClaim(Claims.Mfa, "1"), opt.Value, company.Id);
+            db.Log(http, "company.selected", company.Name);
+            await db.SaveChangesAsync();
+            return Results.Ok(new { company.Id, company.Name });
         }).RequireAuthorization();
 
         g.MapPost("/password", async (ChangePasswordRequest req, HttpContext http, AppDb db, PasswordService pw, IOptions<SecurityOptions> opt) =>
@@ -145,7 +166,7 @@ public static class AuthEndpoints
     public static bool MustSetupTotp(User u, SecurityOptions o) =>
         u.TotpSecret == null && (o.RequireTotpForAll || (o.RequireTotpForAdmin && u.Role == UserRole.Admin));
 
-    private static async Task SignIn(HttpContext http, User user, bool mfa, SecurityOptions o)
+    private static async Task SignIn(HttpContext http, User user, bool mfa, SecurityOptions o, int? companyId)
     {
         var claims = new List<Claim>
         {
@@ -156,6 +177,7 @@ public static class AuthEndpoints
             new("stamp", Stamp(user)),
         };
         if (mfa) claims.Add(new Claim(Claims.Mfa, "1"));
+        if (companyId is { } cid) claims.Add(new Claim(Claims.Company, cid.ToString()));
         var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme));
         await http.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal,
             new AuthenticationProperties { IsPersistent = true, ExpiresUtc = DateTimeOffset.UtcNow.AddHours(o.SessionHours) });

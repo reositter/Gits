@@ -32,15 +32,19 @@ var dp = builder.Services.AddDataProtection().SetApplicationName("Inventering")
     .PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(dataDir, "keys")));
 if (OperatingSystem.IsWindows()) dp.ProtectKeysWithDpapi(protectToLocalMachine: true);
 
-// ---- Visma ----
+// ---- Visma (en gateway per bolag) ----
 var vismaMode = builder.Configuration["Visma:Mode"] ?? "Fake";
 if (vismaMode.Equals("Adk", StringComparison.OrdinalIgnoreCase))
 {
     var adk = builder.Configuration.GetSection("Visma:Adk").Get<AdkOptions>() ?? new AdkOptions();
-    builder.Services.AddSingleton<IVismaGateway>(new AdkBridgeGateway(adk));
+    builder.Services.AddSingleton(new AdkBridgeRunner(adk));
+    builder.Services.AddSingleton<IVismaGatewayFactory>(sp => new AdkGatewayFactory(
+        sp.GetRequiredService<AdkBridgeRunner>(),
+        c => sp.GetRequiredService<CompanyService>().Unprotect(c)));
 }
-else builder.Services.AddSingleton<IVismaGateway, FakeVismaGateway>();
+else builder.Services.AddSingleton<IVismaGatewayFactory, FakeVismaGatewayFactory>();
 
+builder.Services.AddSingleton<CompanyService>();
 builder.Services.AddSingleton<ArticleCache>();
 builder.Services.AddSingleton<BarcodeService>();
 builder.Services.AddHostedService<ArticleRefreshService>();
@@ -116,6 +120,20 @@ using (var scope = app.Services.CreateScope())
         File.WriteAllText(file, $"Användare: admin\r\nLösenord: {password}\r\n\r\nByt lösenord och radera denna fil efter första inloggningen.\r\n");
         app.Logger.LogWarning("Första admin-kontot skapat. Lösenordet finns i {File}", file);
     }
+
+    if (!db.Companies.Any())
+    {
+        // Första start: ta bolag från tidigare konfiguration (Visma:Adk:CompanyPath) eller skapa demobolag.
+        var legacyPath = app.Configuration["Visma:Adk:CompanyPath"];
+        if (vismaMode.Equals("Adk", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(legacyPath))
+            db.Companies.Add(new Company { Name = Path.GetFileName(legacyPath.TrimEnd('\\', '/')), CompanyPath = legacyPath });
+        else if (!vismaMode.Equals("Adk", StringComparison.OrdinalIgnoreCase))
+        {
+            db.Companies.Add(new Company { Name = "Demo AB", CompanyPath = @"C:\Demo\Företag\FTG1", VismaName = "Demo AB", SortOrder = 1 });
+            db.Companies.Add(new Company { Name = "Testbygg AB", CompanyPath = @"C:\Demo\Företag\FTG2", VismaName = "Testbygg AB", SortOrder = 2 });
+        }
+        db.SaveChanges();
+    }
 }
 await app.Services.GetRequiredService<BarcodeService>().ReloadAsync();
 
@@ -157,6 +175,7 @@ app.MapGet("/api/health", () => Results.Ok(new { ok = true }));
 app.MapAuth();
 app.MapCount();
 app.MapAdmin();
+app.MapAdminGlobal();
 app.MapBarcodeAdmin();
 
 app.Run();

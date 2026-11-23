@@ -7,7 +7,6 @@ using Microsoft.Extensions.Options;
 namespace Inventering.Web.Endpoints;
 
 public record LineDto(Guid Id, string ArticleNo, string? ScannedCode, decimal Quantity, string? Location, string? Comment, DateTimeOffset? CountedAt, string? DeviceId, string? ScanVia = null);
-
 public record EditLineRequest(decimal Quantity, string? Comment);
 public record SubmitRequest(string Password, List<Guid> LineIds, string? DeviceId, string? Comment);
 
@@ -15,29 +14,36 @@ public static class CountEndpoints
 {
     public static object ArticleDto(Article a) => new { a.ArticleNo, a.Name, a.Ean, a.Unit, a.IsStockItem };
 
+    /// <summary>Hämtar inventering i det valda bolaget (null om den tillhör ett annat bolag).</summary>
+    public static async Task<InventorySession?> SessionAsync(AppDb db, HttpContext http, int id) =>
+        await db.Sessions.FirstOrDefaultAsync(s => s.Id == id && s.CompanyId == http.CompanyId());
+
     public static void MapCount(this WebApplication app)
     {
-        var g = app.MapGroup("/api").RequireAuthorization(Policies.Counter);
+        var g = app.MapGroup("/api").RequireAuthorization(Policies.Counter).AddEndpointFilter<CompanyFilter>();
 
-        g.MapGet("/sessions/open", async (AppDb db) =>
-            await db.Sessions.Where(s => s.Status == SessionStatus.Open)
-                .OrderByDescending(s => s.CreatedAt)
+        g.MapGet("/sessions/open", async (AppDb db, HttpContext http) =>
+        {
+            var cid = http.CompanyId();
+            return await db.Sessions.Where(s => s.CompanyId == cid && s.Status == SessionStatus.Open)
+                .OrderByDescending(s => s.Id)
                 .Select(s => new { s.Id, s.Name, s.CreatedAt })
-                .ToListAsync());
+                .ToListAsync();
+        });
 
-        g.MapGet("/articles/lookup", (string code, BarcodeService barcodes) =>
-            barcodes.Parse(code) is { } r
+        g.MapGet("/articles/lookup", (string code, BarcodeService barcodes, HttpContext http) =>
+            barcodes.Parse(http.CompanyId(), code) is { } r
                 ? Results.Ok(new { r.Article.ArticleNo, r.Article.Name, r.Article.Ean, r.Article.Unit, r.Article.IsStockItem, quantity = r.Quantity, via = r.Via })
                 : Results.NotFound(new { error = $"Ingen artikel med kod \"{code}\"." }));
 
-        g.MapGet("/articles/search", (string q, ArticleCache cache) =>
-            cache.Search(q).Select(ArticleDto));
+        g.MapGet("/articles/search", (string q, ArticleCache cache, HttpContext http) =>
+            cache.Search(http.CompanyId(), q).Select(ArticleDto));
 
         // Tar emot en eller flera rader (offline-kön skickar flera). Idempotent på radens Id.
         g.MapPost("/sessions/{id:int}/lines", async (int id, List<LineDto> lines, AppDb db, ArticleCache cache, HttpContext http) =>
         {
-            var session = await db.Sessions.FindAsync(id);
-            if (session is null) return Results.NotFound(new { error = "Inventeringen finns inte." });
+            var session = await SessionAsync(db, http, id);
+            if (session is null) return Results.NotFound(new { error = "Inventeringen finns inte i det valda bolaget." });
             var isAdmin = http.User.IsInRole(nameof(UserRole.Admin));
             // Admin får lägga korrigeringsrader i låst inventering.
             if (session.Status != SessionStatus.Open && !(isAdmin && session.Status == SessionStatus.Locked))
@@ -48,11 +54,12 @@ public static class CountEndpoints
             var existing = await db.Lines.Where(l => ids.Contains(l.Id)).Select(l => l.Id).ToListAsync();
             var accepted = new List<Guid>();
             var rejected = new List<object>();
+            var added = new List<CountLine>();
 
             foreach (var l in lines)
             {
                 if (existing.Contains(l.Id)) { accepted.Add(l.Id); continue; }
-                var art = cache.Get(l.ArticleNo);
+                var art = cache.Get(session.CompanyId, l.ArticleNo ?? "");
                 string? error = l.Id == Guid.Empty ? "Saknar id"
                     : art is null ? $"Okänd artikel {l.ArticleNo}"
                     : !art.IsStockItem ? $"Artikel {l.ArticleNo} är inte lagerförd"
@@ -61,43 +68,43 @@ public static class CountEndpoints
                     : null;
                 if (error != null) { rejected.Add(new { l.Id, error }); continue; }
 
-                db.Lines.Add(new CountLine
+                var line = new CountLine
                 {
                     Id = l.Id, SessionId = id, UserId = userId, DeviceId = Trim(l.DeviceId, 64),
                     ArticleNo = art!.ArticleNo, ScannedCode = Trim(l.ScannedCode, 128), ScanVia = Trim(l.ScanVia, 100), Quantity = l.Quantity,
                     Location = Trim(l.Location, 64), Comment = Trim(l.Comment, 500),
                     CountedAt = DateTimeOffset.FromUnixTimeMilliseconds((l.CountedAt ?? DateTimeOffset.UtcNow).ToUnixTimeMilliseconds()),
-                });
+                };
+                db.Lines.Add(line);
+                added.Add(line);
                 accepted.Add(l.Id);
             }
             await db.SaveChangesAsync();
 
             // Admins korrigeringar i låst inventering lämnas in direkt (admin är redan inloggad med 2FA).
-            if (isAdmin && session.Status == SessionStatus.Locked)
-            {
-                var newLines = db.ChangeTracker.Entries<CountLine>().Select(e => e.Entity)
-                    .Where(x => accepted.Contains(x.Id) && x.SubmissionId == null).ToList();
-                if (newLines.Count > 0)
-                    await Submissions.CreateAsync(db, http, id, userId, newLines, "admin-correction", null, "Korrigering av admin");
-            }
+            if (isAdmin && session.Status == SessionStatus.Locked && added.Count > 0)
+                await Submissions.CreateAsync(db, http, id, userId, added, "admin-correction", null, "Korrigering av admin");
+
             return Results.Ok(new { accepted, rejected });
         });
 
         g.MapGet("/sessions/{id:int}/mylines", async (int id, AppDb db, ArticleCache cache, HttpContext http) =>
         {
+            if (await SessionAsync(db, http, id) is null) return Results.NotFound();
             var userId = http.User.RequiredUserId();
+            var cid = http.CompanyId();
             var lines = await db.Lines.Where(l => l.SessionId == id && l.UserId == userId && !l.IsVoided).ToListAsync();
-            return lines.OrderByDescending(l => l.CountedAt).Select(l => new
+            return Results.Ok(lines.OrderByDescending(l => l.CountedAt).Select(l => new
             {
-                l.Id, l.ArticleNo, name = cache.Get(l.ArticleNo)?.Name, l.Quantity, l.Location, l.Comment, l.CountedAt, l.ScannedCode, l.SubmissionId,
-            });
+                l.Id, l.ArticleNo, name = cache.Get(cid, l.ArticleNo)?.Name, l.Quantity, l.Location, l.Comment, l.CountedAt, l.ScannedCode, l.SubmissionId,
+            }));
         });
 
         // Ändra antal på en egen rad. Den gamla raden stryks och en ny skapas → full spårbarhet.
         g.MapPatch("/sessions/{id:int}/lines/{lineId:guid}", async (int id, Guid lineId, EditLineRequest req, AppDb db, HttpContext http) =>
         {
+            var session = await SessionAsync(db, http, id);
             var line = await db.Lines.FirstOrDefaultAsync(l => l.Id == lineId && l.SessionId == id);
-            var session = await db.Sessions.FindAsync(id);
             if (line is null || session is null) return Results.NotFound();
             if (line.UserId != http.User.RequiredUserId()) return Results.Forbid();
             if (session.Status != SessionStatus.Open) return Results.Json(new { error = "Inventeringen är stängd." }, statusCode: 409);
@@ -123,7 +130,7 @@ public static class CountEndpoints
         g.MapPost("/sessions/{id:int}/submit", async (int id, SubmitRequest req, AppDb db, PasswordService pw,
             IOptions<SecurityOptions> opt, HttpContext http) =>
         {
-            var session = await db.Sessions.FindAsync(id);
+            var session = await SessionAsync(db, http, id);
             if (session is null) return Results.NotFound();
             if (session.Status != SessionStatus.Open) return Results.Json(new { error = "Inventeringen är stängd för inlämning." }, statusCode: 409);
             var user = await db.Users.FindAsync(http.User.RequiredUserId());
@@ -155,16 +162,17 @@ public static class CountEndpoints
 
         g.MapGet("/sessions/{id:int}/mysubmissions", async (int id, AppDb db, HttpContext http) =>
         {
+            if (await SessionAsync(db, http, id) is null) return Results.NotFound();
             var userId = http.User.RequiredUserId();
             var subs = await db.Submissions.AsNoTracking().Where(s => s.SessionId == id && s.UserId == userId).ToListAsync();
-            return subs.OrderByDescending(s => s.SubmittedAt).Select(s => new { s.Id, s.SubmittedAt, s.LineCount, s.TotalQuantity, s.Hash });
+            return Results.Ok(subs.OrderByDescending(s => s.SubmittedAt).Select(s => new { s.Id, s.SubmittedAt, s.LineCount, s.TotalQuantity, s.Hash }));
         });
 
         // Räknaren kan ångra egna rader så länge inventeringen är öppen.
         g.MapDelete("/sessions/{id:int}/lines/{lineId:guid}", async (int id, Guid lineId, AppDb db, HttpContext http) =>
         {
+            var session = await SessionAsync(db, http, id);
             var line = await db.Lines.FirstOrDefaultAsync(l => l.Id == lineId && l.SessionId == id);
-            var session = await db.Sessions.FindAsync(id);
             if (line is null || session is null) return Results.NotFound();
             if (line.UserId != http.User.RequiredUserId()) return Results.Forbid();
             if (session.Status != SessionStatus.Open) return Results.Json(new { error = "Inventeringen är stängd." }, statusCode: 409);

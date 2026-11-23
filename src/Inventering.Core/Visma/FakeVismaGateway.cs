@@ -8,8 +8,21 @@ public class FakeVismaGateway : IVismaGateway
 {
     private readonly ConcurrentDictionary<string, Article> _articles = new(StringComparer.OrdinalIgnoreCase);
 
-    public FakeVismaGateway()
+    public FakeVismaGateway() : this(1) { }
+
+    /// <summary>Olika testdata per bolag så att det syns vilket bolag man jobbar i.</summary>
+    public FakeVismaGateway(int seed)
     {
+        if (seed % 2 == 0)
+        {
+            void Add2(string no, string name, string? ean, decimal qty, string unit = "st") =>
+                _articles[no] = new Article { ArticleNo = no, Name = name, Ean = ean, StockQuantity = qty, Unit = unit, UpdatedAt = DateTimeOffset.UtcNow };
+            Add2("A100", "Gipsskiva 13 mm", "7320000000105", 120);
+            Add2("A200", "Regel 45x95 (m)", null, 800, "m");
+            Add2("A300", "Spik 75 mm (kg)", "7320000000303", 35, "kg");
+            Add2("1001", "Skruv M6x20 (100-pack)", "7310000000011", 15);
+            return;
+        }
         void Add(string no, string name, string? ean, decimal qty, string unit = "st") =>
             _articles[no] = new Article { ArticleNo = no, Name = name, Ean = ean, StockQuantity = qty, Unit = unit, UpdatedAt = DateTimeOffset.UtcNow };
         Add("1001", "Skruv M6x20 (100-pack)", "7310000000011", 40);
@@ -50,4 +63,19 @@ public class FakeVismaGateway : IVismaGateway
         ArticleNo = a.ArticleNo, Name = a.Name, Ean = a.Ean, Unit = a.Unit,
         StockQuantity = a.StockQuantity, IsStockItem = a.IsStockItem, UpdatedAt = DateTimeOffset.UtcNow,
     };
+}
+
+public class FakeVismaGatewayFactory : IVismaGatewayFactory
+{
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, FakeVismaGateway> _byCompany = new();
+    public string Mode => "Fake";
+    public IVismaGateway For(Company company) => _byCompany.GetOrAdd(company.Id, id => new FakeVismaGateway(id));
+    public FakeVismaGateway ForId(int companyId) => _byCompany.GetOrAdd(companyId, id => new FakeVismaGateway(id));
+    public Task<IReadOnlyList<VismaCompanyInfo>> DiscoverCompaniesAsync(CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<VismaCompanyInfo>>(
+        [
+            new("Demo AB", "FTG1", @"C:\Demo\Företag\FTG1", "SPCS_Adm_FTG1"),
+            new("Testbygg AB", "FTG2", @"C:\Demo\Företag\FTG2", "SPCS_Adm_FTG2"),
+            new("FTG3", "FTG3", @"C:\Demo\Företag\FTG3", "SPCS_Adm_FTG3"),
+        ]);
 }

@@ -1,106 +1,126 @@
+using System.Collections.Concurrent;
 using Inventering.Core.Domain;
-using Inventering.Core.Visma;
 using Inventering.Web.Data;
 using Microsoft.EntityFrameworkCore;
 
 namespace Inventering.Web.Services;
 
 /// <summary>
-/// Håller artikelregistret i minnet (och i SQLite) så att skanning inte behöver vänta på ADK.
+/// Hela artikelregistret per bolag hålls i minnet (och i SQLite för snabb uppstart).
+/// Skanning och sökning går aldrig mot Visma – ADK används bara för periodisk uppdatering i bakgrunden.
 /// </summary>
-public class ArticleCache(IServiceScopeFactory scopes, IVismaGateway visma, ILogger<ArticleCache> log)
+public class ArticleCache(IServiceScopeFactory scopes, CompanyService companies, ILogger<ArticleCache> log)
 {
-    private readonly SemaphoreSlim _refreshLock = new(1, 1);
-    private volatile Snapshot _snap = new([]);
+    private readonly ConcurrentDictionary<int, Snapshot> _snaps = new();
+    private readonly ConcurrentDictionary<int, SemaphoreSlim> _locks = new();
+    private readonly ConcurrentDictionary<int, (DateTimeOffset? At, string? Error)> _state = new();
 
-    public DateTimeOffset? LastRefresh { get; private set; }
-    public string? LastError { get; private set; }
-    public int Count => _snap.All.Count;
+    private Snapshot Snap(int companyId) => _snaps.TryGetValue(companyId, out var s) ? s : Snapshot.Empty;
 
-    public Article? Find(string code) => CodeLookup.Find(code, _snap.ByEan, _snap.ByArticleNo);
+    public DateTimeOffset? LastRefresh(int companyId) => _state.TryGetValue(companyId, out var s) ? s.At : null;
+    public string? LastError(int companyId) => _state.TryGetValue(companyId, out var s) ? s.Error : null;
+    public int Count(int companyId) => Snap(companyId).All.Count;
 
-    public Article? Get(string articleNo) => _snap.ByArticleNo.GetValueOrDefault(articleNo);
+    public Article? Get(int companyId, string articleNo) => Snap(companyId).ByArticleNo.GetValueOrDefault(articleNo.Trim());
+    public Article? FindByEan(int companyId, string ean) => Snap(companyId).ByEan.GetValueOrDefault(ean);
+    public IReadOnlyDictionary<string, Article> ByArticleNo(int companyId) => Snap(companyId).ByArticleNo;
+    public IReadOnlyList<Article> All(int companyId) => Snap(companyId).All;
 
-    public Article? FindByEan(string ean) => _snap.ByEan.GetValueOrDefault(ean);
-
-    public IReadOnlyDictionary<string, Article> ByArticleNo => _snap.ByArticleNo;
-
-    public IReadOnlyList<Article> All => _snap.All;
-
-    public IReadOnlyList<Article> Search(string q, int max = 25)
+    /// <summary>Sökning på artikelnr, benämning och EAN mot ett förberett index i minnet.</summary>
+    public IReadOnlyList<Article> Search(int companyId, string q, int max = 25)
     {
         q = q.Trim();
         if (q.Length == 0) return [];
-        return _snap.All
-            .Where(a => a.ArticleNo.Contains(q, StringComparison.OrdinalIgnoreCase)
-                     || a.Name.Contains(q, StringComparison.OrdinalIgnoreCase)
-                     || (a.Ean?.Contains(q) ?? false))
-            .OrderBy(a => a.ArticleNo.StartsWith(q, StringComparison.OrdinalIgnoreCase) ? 0 : 1)
-            .ThenBy(a => a.ArticleNo, StringComparer.OrdinalIgnoreCase)
-            .Take(max).ToList();
+        var snap = Snap(companyId);
+        var terms = q.ToLowerInvariant().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var hits = new List<(Article A, int Rank)>();
+        for (var i = 0; i < snap.All.Count; i++)
+        {
+            var text = snap.SearchText[i];
+            if (!terms.All(text.Contains)) continue;
+            var a = snap.All[i];
+            var rank = a.ArticleNo.Equals(q, StringComparison.OrdinalIgnoreCase) ? 0
+                : a.ArticleNo.StartsWith(q, StringComparison.OrdinalIgnoreCase) ? 1 : 2;
+            hits.Add((a, rank));
+        }
+        return hits.OrderBy(h => h.Rank).ThenBy(h => h.A.ArticleNo, StringComparer.OrdinalIgnoreCase).Take(max).Select(h => h.A).ToList();
     }
 
-    /// <summary>Läser in från SQLite vid uppstart så att skanning fungerar även om Visma inte svarar.</summary>
+    /// <summary>Läser in alla bolags artiklar från SQLite vid uppstart – skanning fungerar även om Visma inte svarar.</summary>
     public async Task LoadFromDbAsync(CancellationToken ct = default)
     {
         using var scope = scopes.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDb>();
-        _snap = new Snapshot(await db.Articles.AsNoTracking().ToListAsync(ct));
+        var all = await db.Articles.AsNoTracking().ToListAsync(ct);
+        foreach (var g in all.GroupBy(a => a.CompanyId))
+        {
+            _snaps[g.Key] = new Snapshot(g.ToList());
+            _state[g.Key] = (g.Max(a => a.UpdatedAt), null);
+        }
     }
 
-    /// <summary>Hämtar alla artiklar från Visma och uppdaterar cachen.</summary>
-    public async Task RefreshAsync(CancellationToken ct = default)
+    /// <summary>Hämtar alla artiklar för ett bolag från Visma och ersätter cachen.</summary>
+    public async Task RefreshAsync(int companyId, CancellationToken ct = default)
     {
-        await _refreshLock.WaitAsync(ct);
+        var gate = _locks.GetOrAdd(companyId, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(ct);
         try
         {
-            var articles = await visma.GetArticlesAsync(ct);
-            using var scope = scopes.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<AppDb>();
-            await using var tx = await db.Database.BeginTransactionAsync(ct);
-            await db.Articles.ExecuteDeleteAsync(ct);
+            var visma = await companies.GatewayAsync(companyId);
+            var articles = (await visma.GetArticlesAsync(ct))
+                .DistinctBy(a => a.ArticleNo, StringComparer.OrdinalIgnoreCase).ToList();
             var now = DateTimeOffset.UtcNow;
             foreach (var a in articles)
             {
+                a.CompanyId = companyId;
                 a.UpdatedAt = now;
                 a.Ean = string.IsNullOrWhiteSpace(a.Ean) ? null : CodeLookup.NormalizeEan(a.Ean);
             }
-            db.Articles.AddRange(articles.DistinctBy(a => a.ArticleNo, StringComparer.OrdinalIgnoreCase));
+
+            using var scope = scopes.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDb>();
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
+            await db.Articles.Where(a => a.CompanyId == companyId).ExecuteDeleteAsync(ct);
+            db.Articles.AddRange(articles);
             await db.SaveChangesAsync(ct);
             await tx.CommitAsync(ct);
-            db.ChangeTracker.Clear();
-            _snap = new Snapshot(articles.ToList());
-            LastRefresh = now;
-            LastError = null;
-            log.LogInformation("Artikelcache uppdaterad: {Count} artiklar", articles.Count);
+
+            _snaps[companyId] = new Snapshot(articles);
+            _state[companyId] = (now, null);
+            log.LogInformation("Artikelcache bolag {Company}: {Count} artiklar", companyId, articles.Count);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            LastError = ex.Message;
-            log.LogError(ex, "Kunde inte uppdatera artikelcache från Visma");
+            _state[companyId] = (LastRefresh(companyId), ex.Message);
+            log.LogError(ex, "Kunde inte uppdatera artikelcache för bolag {Company}", companyId);
             throw;
         }
-        finally { _refreshLock.Release(); }
+        finally { gate.Release(); }
     }
+
+    public void Forget(int companyId) => _snaps.TryRemove(companyId, out _);
 
     private sealed class Snapshot
     {
+        public static readonly Snapshot Empty = new([]);
+
         public Snapshot(List<Article> all)
         {
             All = all;
             ByArticleNo = all.DistinctBy(a => a.ArticleNo, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(a => a.ArticleNo, StringComparer.OrdinalIgnoreCase);
-            // Om två artiklar har samma EAN vinner den första – varning loggas inte här men syns vid sökning.
-            ByEan = all.Where(a => a.Ean != null).DistinctBy(a => a.Ean!)
-                .ToDictionary(a => a.Ean!, StringComparer.Ordinal);
+            ByEan = all.Where(a => a.Ean != null).DistinctBy(a => a.Ean!).ToDictionary(a => a.Ean!, StringComparer.Ordinal);
+            // Förberäknad söktext (gemener) så att fritextsökning bara blir strängjämförelser i minnet.
+            SearchText = all.Select(a => $"{a.ArticleNo} {a.Name} {a.Ean}".ToLowerInvariant()).ToArray();
         }
         public List<Article> All { get; }
         public Dictionary<string, Article> ByArticleNo { get; }
         public Dictionary<string, Article> ByEan { get; }
+        public string[] SearchText { get; }
     }
 }
 
-public class ArticleRefreshService(ArticleCache cache, IConfiguration config, ILogger<ArticleRefreshService> log) : BackgroundService
+public class ArticleRefreshService(ArticleCache cache, CompanyService companies, IConfiguration config, ILogger<ArticleRefreshService> log) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
@@ -108,8 +128,12 @@ public class ArticleRefreshService(ArticleCache cache, IConfiguration config, IL
         var minutes = config.GetValue("Visma:ArticleRefreshMinutes", 15);
         while (!ct.IsCancellationRequested)
         {
-            try { await cache.RefreshAsync(ct); }
-            catch (Exception ex) when (ex is not OperationCanceledException) { log.LogWarning("Artikeluppdatering misslyckades: {Msg}", ex.Message); }
+            foreach (var c in await companies.ActiveAsync())
+            {
+                try { await cache.RefreshAsync(c.Id, ct); }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                { log.LogWarning("Artikeluppdatering misslyckades för {Company}: {Msg}", c.Name, ex.Message); }
+            }
             await Task.Delay(TimeSpan.FromMinutes(Math.Max(1, minutes)), ct);
         }
     }

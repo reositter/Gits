@@ -48,12 +48,20 @@ public class ApiFlowTests : IDisposable
     {
         var admin = Client();
         await Json(await admin.PostAsJsonAsync("/api/auth/login", new { userName = "admin", password = AdminPassword() }));
+        // Två demobolag → måste välja
+        Assert.Equal(HttpStatusCode.Conflict, (await admin.GetAsync("/api/admin/sessions")).StatusCode);
+        var me = await Json(await admin.GetAsync("/api/auth/me"));
+        Assert.Equal(2, me.GetProperty("companies").GetArrayLength());
+        var demo = me.GetProperty("companies")[0].GetProperty("id").GetInt32();
+        var other = me.GetProperty("companies")[1].GetProperty("id").GetInt32();
+        await Json(await admin.PostAsJsonAsync("/api/auth/company", new { companyId = demo }));
 
         // Två räknare
         var pw = new Dictionary<string, string>();
+        // Anna och Bo får bara jobba i Demo AB → bolaget väljs automatiskt vid inloggning
         foreach (var u in new[] { "anna", "bo" })
         {
-            var r = await Json(await admin.PostAsJsonAsync("/api/admin/users", new { userName = u, role = "Counter" }));
+            var r = await Json(await admin.PostAsJsonAsync("/api/admin/users", new { userName = u, role = "Counter", companyIds = new[] { demo } }));
             pw[u] = r.GetProperty("password").GetString()!;
         }
 
@@ -65,8 +73,10 @@ public class ApiFlowTests : IDisposable
         var bo = Client();
         await Json(await bo.PostAsJsonAsync("/api/auth/login", new { userName = "bo", password = pw["bo"] }));
 
-        // Räknare får inte nå admin-API
+        // Räknare får inte nå admin-API eller välja annat bolag
         Assert.Equal(HttpStatusCode.Forbidden, (await anna.GetAsync("/api/admin/sessions")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await anna.PostAsJsonAsync("/api/auth/company", new { companyId = other })).StatusCode);
+        Assert.Single((await Json(await anna.GetAsync("/api/sessions/open"))).EnumerateArray());
 
         // Uppslag via EAN och via artikelnr (artikel utan EAN)
         var art = await Json(await anna.GetAsync("/api/articles/lookup?code=7310000000011"));
@@ -141,9 +151,17 @@ public class ApiFlowTests : IDisposable
         var sent = await Json(await admin.PostAsJsonAsync($"/api/admin/sessions/{sid}/send", new { confirm = true, zeroUncounted = false }));
         Assert.Equal(1, sent.GetProperty("ok").GetInt32());
 
-        var visma = (FakeVismaGateway)_factory.Services.GetRequiredService<IVismaGateway>();
+        var visma = ((FakeVismaGatewayFactory)_factory.Services.GetRequiredService<IVismaGatewayFactory>()).ForId(demo);
         Assert.Equal(20, visma.Current.Single(a => a.ArticleNo == "1001").StockQuantity);
         Assert.Equal(25, visma.Current.Single(a => a.ArticleNo == "1002").StockQuantity); // ej räknad → orörd
+
+        // Det andra bolaget är helt separat: egna artiklar och inga inventeringar
+        await Json(await admin.PostAsJsonAsync("/api/auth/company", new { companyId = other }));
+        Assert.Empty((await Json(await admin.GetAsync("/api/admin/sessions"))).EnumerateArray());
+        Assert.Equal(HttpStatusCode.NotFound, (await admin.GetAsync($"/api/admin/sessions/{sid}/summary")).StatusCode);
+        await Json(await admin.PostAsync("/api/admin/articles/refresh", null));
+        Assert.Equal(HttpStatusCode.OK, (await admin.GetAsync("/api/articles/lookup?code=A100")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await admin.GetAsync("/api/articles/lookup?code=1003")).StatusCode);
     }
 
     [Fact]
@@ -185,7 +203,7 @@ public class ApiFlowTests : IDisposable
         var secret = setup.GetProperty("secret").GetString()!;
         var code = new OtpNet.Totp(OtpNet.Base32Encoding.ToBytes(secret)).ComputeTotp();
         await Json(await c.PostAsJsonAsync("/api/auth/totp/confirm", new { code }));
-        Assert.Equal(HttpStatusCode.OK, (await c.GetAsync("/api/admin/sessions")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await c.GetAsync("/api/admin/users")).StatusCode);
 
         // Nästa inloggning kräver kod
         var c2 = f.CreateClient();

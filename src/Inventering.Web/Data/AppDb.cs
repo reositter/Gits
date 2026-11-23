@@ -6,6 +6,8 @@ namespace Inventering.Web.Data;
 public class AppDb(DbContextOptions<AppDb> options) : DbContext(options)
 {
     public DbSet<User> Users => Set<User>();
+    public DbSet<Company> Companies => Set<Company>();
+    public DbSet<UserCompany> UserCompanies => Set<UserCompany>();
     public DbSet<Article> Articles => Set<Article>();
     public DbSet<InventorySession> Sessions => Set<InventorySession>();
     public DbSet<StockSnapshot> Snapshots => Set<StockSnapshot>();
@@ -23,14 +25,17 @@ public class AppDb(DbContextOptions<AppDb> options) : DbContext(options)
             e.HasIndex(x => x.UserName).IsUnique();
             e.Property(x => x.UserName).UseCollation("NOCASE");
         });
+        b.Entity<Company>(e => e.HasIndex(x => x.CompanyPath).IsUnique());
+        b.Entity<UserCompany>(e => e.HasKey(x => new { x.UserId, x.CompanyId }));
         b.Entity<Article>(e =>
         {
-            e.HasKey(x => x.ArticleNo);
+            e.HasKey(x => new { x.CompanyId, x.ArticleNo });
             e.Property(x => x.ArticleNo).UseCollation("NOCASE");
-            e.HasIndex(x => x.Ean);
+            e.HasIndex(x => new { x.CompanyId, x.Ean });
         });
         b.Entity<InventorySession>(e =>
         {
+            e.HasIndex(x => new { x.CompanyId, x.Status });
             e.HasMany(x => x.Snapshot).WithOne().HasForeignKey(x => x.SessionId);
             e.HasMany(x => x.Lines).WithOne().HasForeignKey(x => x.SessionId);
         });
@@ -42,7 +47,7 @@ public class AppDb(DbContextOptions<AppDb> options) : DbContext(options)
             e.HasIndex(x => new { x.SessionId, x.ArticleNo });
         });
         b.Entity<SendResult>(e => e.HasIndex(x => x.SessionId));
-        b.Entity<BarcodeAlias>(e => { e.HasKey(x => x.Code); e.HasIndex(x => x.ArticleNo); });
+        b.Entity<BarcodeAlias>(e => { e.HasKey(x => new { x.CompanyId, x.Code }); e.HasIndex(x => new { x.CompanyId, x.ArticleNo }); });
         b.Entity<Submission>(e => e.HasIndex(x => new { x.SessionId, x.UserId }));
         b.Entity<CountLine>().HasIndex(x => x.SubmissionId);
 

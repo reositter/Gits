@@ -68,6 +68,14 @@ setInterval(flush, 10000);
 window.addEventListener('online', flush);
 
 // ---------- Start ----------
+// Byt inte bolag medan rader väntar på att skickas – de hör till inventeringen i nuvarande bolag.
+window.beforeCompanySwitch = () => {
+  if (queue.all().length) { alert('Det finns rader som inte skickats än. Vänta tills du har uppkoppling och försök igen.'); return false; }
+  stopScanner();
+  prefs.sessionId = null; savePrefs();
+  return true;
+};
+
 async function start() {
   me = await ensureLoggedIn(main);
   $('#logoutBtn').classList.remove('hidden');

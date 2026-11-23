@@ -18,6 +18,12 @@ export async function api(method, url, body) {
   const text = await res.text();
   let data = null;
   try { data = text ? JSON.parse(text) : null; } catch { data = { error: text }; }
+  if (res.status === 409 && data?.needCompany) {
+    // Bolaget är inte valt (eller behörigheten har ändrats) – visa bolagsväljaren igen.
+    sessionStorage.setItem('inv.needCompany', '1');
+    location.reload();
+    await new Promise(() => {});
+  }
   if (!res.ok) throw new ApiError(res.status, data);
   return data;
 }
@@ -37,6 +43,12 @@ export async function ensureLoggedIn(main, { requireAdmin = false } = {}) {
     await totpSetup(main, me);
     me = await api('GET', '/api/auth/me');
   }
+  if (!me.company || sessionStorage.getItem('inv.needCompany')) {
+    sessionStorage.removeItem('inv.needCompany');
+    await companyPicker(main, me);
+    me = await api('GET', '/api/auth/me');
+  }
+  showCompany(me);
   if (requireAdmin && me.role !== 'Admin') {
     main.innerHTML = `<div class="card"><h2>Ingen behörighet</h2><p>Sidan kräver administratör.</p><a href="/">Till räkning</a></div>`;
     throw new Error('not admin');
@@ -47,6 +59,51 @@ export async function ensureLoggedIn(main, { requireAdmin = false } = {}) {
     return ensureLoggedIn(main, { requireAdmin });
   }
   return me;
+}
+
+/** Visar valt bolag i sidhuvudet med knapp för att byta. */
+function showCompany(me) {
+  const el = document.getElementById('companyBtn');
+  if (!el || !me.company) return;
+  el.textContent = `🏢 ${me.company.name}`;
+  el.title = me.companies.length > 1 ? 'Byt bolag' : 'Bolag';
+  el.classList.remove('hidden');
+  el.disabled = me.companies.length < 2;
+  el.onclick = async () => {
+    if (window.beforeCompanySwitch && !window.beforeCompanySwitch()) return;
+    await companyPicker(document.getElementById('main'), me);
+    location.reload();
+  };
+}
+
+/** Låter användaren välja bolag. Ett bolag väljs automatiskt. */
+function companyPicker(main, me) {
+  return new Promise((resolve) => {
+    if (me.companies.length === 0) {
+      main.innerHTML = `<div class="card"><h2>Inga bolag</h2><p>Du har inte behörighet till något bolag, eller så är inga bolag upplagda.
+        ${me.role === 'Admin' ? 'Lägg till bolag under Admin → Bolag.' : 'Kontakta administratören.'}</p>
+        ${me.role === 'Admin' ? '<a href="/admin.html#companies">Till admin</a>' : ''}
+        <button id="lo" style="margin-top:12px">Logga ut</button></div>`;
+      document.getElementById('lo').onclick = logout;
+      if (me.role === 'Admin' && location.pathname.endsWith('admin.html')) resolve();
+      return;
+    }
+    if (me.companies.length === 1) {
+      api('POST', '/api/auth/company', { companyId: me.companies[0].id }).then(resolve);
+      return;
+    }
+    main.innerHTML = `
+      <div class="card">
+        <h2>Välj bolag</h2>
+        <ul class="list">${me.companies.map((c) => `
+          <li><div class="grow"><b>${esc(c.name)}</b></div>
+          <button class="${me.company?.id === c.id ? '' : 'primary'} shrink" data-id="${c.id}">${me.company?.id === c.id ? 'Valt' : 'Välj'}</button></li>`).join('')}</ul>
+      </div>`;
+    main.querySelectorAll('button[data-id]').forEach((b) => b.onclick = async () => {
+      await api('POST', '/api/auth/company', { companyId: Number(b.dataset.id) });
+      resolve();
+    });
+  });
 }
 
 function loginForm(main) {

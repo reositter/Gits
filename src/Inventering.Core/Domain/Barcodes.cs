@@ -15,6 +15,8 @@ public enum BarcodeRuleType
 public class BarcodeRule
 {
     public int Id { get; set; }
+    /// <summary>Null = gäller alla bolag.</summary>
+    public int? CompanyId { get; set; }
     public string Name { get; set; } = "";
     public int SortOrder { get; set; }
     public bool IsActive { get; set; } = true;
@@ -31,6 +33,7 @@ public class BarcodeRule
 /// <summary>Extra streckkod för en artikel, t.ex. kartong-EAN = 12 st. Visma har bara en streckkod per artikel.</summary>
 public class BarcodeAlias
 {
+    public int CompanyId { get; set; }
     public string Code { get; set; } = "";
     public string ArticleNo { get; set; } = "";
     /// <summary>Antal per skanning (förpackningsstorlek).</summary>

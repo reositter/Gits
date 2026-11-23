@@ -79,3 +79,6 @@ details summary { cursor: pointer; list-style: none; }
 details summary::-webkit-details-marker { display: none; }
 details summary::before { content: '▸ '; color: var(--muted); }
 details[open] summary::before { content: '▾ '; }
+#companyBtn { max-width: 40vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#companyBtn:disabled { opacity: 1; cursor: default; }
+@media (max-width: 480px) { header.bar { flex-wrap: wrap; } header.bar h1 { flex-basis: 100%; order: -1; } }

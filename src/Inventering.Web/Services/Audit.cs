@@ -9,6 +9,7 @@ public static class AuditExtensions
         db.Audit.Add(new AuditEntry
         {
             UserId = http.User.UserId(),
+            CompanyId = (http.Items[CompanyContext.Key] as Company)?.Id ?? http.User.CompanyId(),
             Action = action,
             Details = details,
             RemoteIp = http.Connection.RemoteIpAddress?.ToString(),

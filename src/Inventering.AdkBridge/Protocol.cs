@@ -52,4 +52,12 @@ namespace Inventering.AdkBridge
         public int InventoryListRows { get; set; }
         public DateTime? InventoryListDate { get; set; }
     }
+
+    public class CompanyDto
+    {
+        public string Name { get; set; }
+        public string Directory { get; set; }
+        public string DirectoryFullPath { get; set; }
+        public string DatabaseName { get; set; }
+    }
 }
