@@ -1,0 +1,163 @@
+/* Mobilsidan – byggd som en app i telefonen: hela bredden, listor, åtgärder nere vid tummen. */
+body.m {
+  --m-bg: #f2f3f5;
+  --m-surface: #ffffff;
+  --m-fill: #e9ebef;          /* sökfält, chips */
+  --m-text: #111418;
+  --m-text-2: #646b76;
+  --m-line: #e3e5e9;
+  --m-primary: #13294b;       /* skanna/spara */
+  --m-on-primary: #ffffff;
+  --m-link: #1d5bbf;
+  --m-danger: #c42b1c;
+  --m-ok: #13804b;
+  --m-warn: #9a5b00;
+  --m-scrim: rgba(10, 14, 20, .38);
+  background: var(--m-bg);
+  color: var(--m-text);
+  font: 16px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", Roboto, "Segoe UI", sans-serif;
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 96px);
+}
+@media (prefers-color-scheme: dark) {
+  body.m {
+    --m-bg: #0e1116; --m-surface: #181b21; --m-fill: #23272f; --m-text: #f1f3f6; --m-text-2: #9aa1ad; --m-line: #2a2e36;
+    --m-primary: #e8edf6; --m-on-primary: #0e1116; --m-link: #7fb0ff; --m-danger: #ff7a6b; --m-ok: #5bd093; --m-warn: #f0b056;
+    --m-scrim: rgba(0, 0, 0, .6);
+  }
+}
+body.m main { max-width: 640px; margin: 0 auto; padding: 0; }
+body.m .ic { vertical-align: -3px; }
+.m-loading { padding: 40px 20px; color: var(--m-text-2); }
+
+/* ---------- Topp ---------- */
+.m-bar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 8px; max-width: 640px; margin: 0 auto;
+  padding: calc(env(safe-area-inset-top, 0px) + 8px) 12px 8px; background: var(--m-bg); }
+.m-spacer { flex: 1; }
+.m-company { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 10px; min-height: 0; border: 0; border-radius: 17px;
+  background: var(--m-fill); color: var(--m-text); font-family: inherit; font-weight: 500; font-size: 14px; line-height: 1; max-width: 70vw; cursor: pointer; }
+.m-company span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-company:disabled { opacity: 1; }
+.m-iconbtn { width: 36px; height: 36px; padding: 0; min-height: 0; border: 0; border-radius: 18px; background: var(--m-fill); color: var(--m-text); display: inline-grid; place-items: center; cursor: pointer; }
+.m-queue { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; color: var(--m-warn); }
+
+.m-hero { padding: 8px 20px 12px; }
+.m-hero h1 { margin: 0; font-size: 28px; line-height: 1.15; font-weight: 700; letter-spacing: -.02em; }
+.m-meta { margin: 4px 0 0; color: var(--m-text-2); font-size: 14px; }
+.m-meta b { color: var(--m-text); font-weight: 600; }
+
+/* ---------- Sök och chips ---------- */
+.m-search { display: flex; align-items: center; gap: 8px; margin: 0 16px; padding: 0 12px; height: 44px; border-radius: 12px; background: var(--m-fill); color: var(--m-text-2); }
+.m-search input { flex: 1; min-width: 0; height: 100%; border: 0; padding: 0; background: transparent; color: var(--m-text); font: inherit; font-size: 16px; box-shadow: none !important; }
+.m-search input::placeholder { color: var(--m-text-2); }
+.m-search button { border: 0; background: none; color: var(--m-link); font: inherit; font-size: 15px; padding: 0 2px; height: auto; min-height: 0; }
+.m-chips { display: flex; gap: 8px; padding: 10px 16px 4px; overflow-x: auto; }
+.m-chip { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; min-height: 0; border-radius: 16px; border: 1px solid var(--m-line);
+  background: var(--m-surface); color: var(--m-text); font-family: inherit; font-weight: 500; font-size: 14px; line-height: 1; white-space: nowrap; cursor: pointer; }
+.m-chip .ic { color: var(--m-text-2); }
+.m-chip[aria-pressed="true"] { background: var(--m-primary); border-color: var(--m-primary); color: var(--m-on-primary); }
+.m-chip[aria-pressed="true"] .ic { color: inherit; }
+
+.m-reader { margin: 12px 16px 0; border-radius: 14px; overflow: hidden; background: #000; }
+.m-reader video { width: 100% !important; display: block; }
+
+/* ---------- Listor ---------- */
+.m-section { margin-top: 22px; }
+.m-section-h { display: flex; justify-content: space-between; align-items: baseline; padding: 0 20px 6px; font-size: 14px; color: var(--m-text-2); }
+.m-section-h b { font-weight: 600; color: var(--m-text); font-size: 17px; }
+.m-list { list-style: none; margin: 0; padding: 0; background: var(--m-surface); border-top: 1px solid var(--m-line); border-bottom: 1px solid var(--m-line); }
+.m-row { display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 10px 16px 10px 20px; position: relative; cursor: pointer; }
+.m-row + .m-row::before { content: ""; position: absolute; top: 0; left: 20px; right: 0; border-top: 1px solid var(--m-line); }
+.m-row:active { background: var(--m-fill); }
+.m-row-main { flex: 1; min-width: 0; }
+.m-row-t { font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-row-s { font-size: 13.5px; color: var(--m-text-2); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-qty { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.m-qty small { font-size: 13px; font-weight: 400; color: var(--m-text-2); margin-left: 3px; }
+.m-row .chev { color: var(--m-text-2); opacity: .6; }
+.m-row.pending .m-row-s { color: var(--m-warn); }
+.m-empty { padding: 28px 20px; text-align: center; color: var(--m-text-2); font-size: 15px; }
+.m-hit .m-qty { font-size: 14px; font-weight: 400; color: var(--m-link); }
+.m-note { margin: 12px 16px 0; padding: 10px 12px; border-radius: 10px; font-size: 14px; background: var(--m-surface); color: var(--m-text-2); }
+.m-note.bad { color: var(--m-danger); }
+
+/* ---------- Dockan nere ---------- */
+.m-dock { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; display: flex; gap: 10px; max-width: 640px; margin: 0 auto;
+  padding: 10px max(16px, env(safe-area-inset-right, 0px)) calc(env(safe-area-inset-bottom, 0px) + 12px) max(16px, env(safe-area-inset-left, 0px));
+  background: linear-gradient(to top, var(--m-bg) 70%, transparent); }
+.m-btn { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 54px; border-radius: 14px; border: 0;
+  font-family: inherit; font-weight: 600; font-size: 17px; line-height: 1; cursor: pointer; }
+.m-btn-primary { background: var(--m-primary); color: var(--m-on-primary); }
+.m-btn-secondary { background: var(--m-surface); color: var(--m-text); border: 1px solid var(--m-line); }
+.m-btn-danger { background: transparent; color: var(--m-danger); height: 48px; font-weight: 500; }
+.m-btn-plain { background: transparent; color: var(--m-text-2); height: 44px; font-weight: 500; }
+.m-btn:disabled { opacity: .45; }
+.m-btn:active:not(:disabled) { filter: brightness(.92); }
+.m-dock .m-btn-secondary { flex: 0 0 auto; padding: 0 18px; }
+
+/* ---------- Kvittens-toast ---------- */
+.m-toast { position: fixed; left: 16px; right: 16px; bottom: calc(env(safe-area-inset-bottom, 0px) + 84px); z-index: 31; max-width: 600px; margin: 0 auto;
+  display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 12px; background: #1f2329; color: #fff; font-size: 15px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.18); }
+.m-toast[hidden] { display: none; }
+.m-toast span { flex: 1; min-width: 0; }
+.m-toast button { border: 0; background: none; color: #9cc3ff; font-family: inherit; font-weight: 600; font-size: 15px; line-height: 1; padding: 0; height: auto; min-height: 0; }
+
+/* ---------- Ark underifrån ---------- */
+dialog.m-sheet { margin: auto 0 0; width: 100%; max-width: 640px; margin-inline: auto; max-height: 92vh; border: 0; border-radius: 18px 18px 0 0;
+  padding: 8px 20px calc(env(safe-area-inset-bottom, 0px) + 16px); background: var(--m-surface); color: var(--m-text); box-shadow: 0 -8px 30px rgba(0,0,0,.15); }
+dialog.m-sheet::backdrop { background: var(--m-scrim); }
+@media (prefers-reduced-motion: no-preference) {
+  dialog.m-sheet[open] { animation: m-up .22s cubic-bezier(.2,.8,.2,1); }
+  @keyframes m-up { from { transform: translateY(40px); opacity: .6; } to { transform: none; opacity: 1; } }
+}
+.m-grab { width: 38px; height: 5px; border-radius: 3px; background: var(--m-line); margin: 0 auto 14px; }
+.m-sheet h2 { margin: 0; font-size: 20px; line-height: 1.25; font-weight: 650; }
+.m-sheet .m-sub { color: var(--m-text-2); font-size: 14px; margin-top: 4px; }
+.m-sheet label { color: var(--m-text-2); font-size: 13px; font-weight: 500; margin: 16px 0 6px; }
+.m-sheet input:not([type=checkbox]) { height: 48px; border-radius: 12px; border: 1px solid var(--m-line); background: var(--m-bg); color: var(--m-text); font-size: 16px; padding: 0 14px; }
+.m-actions { display: flex; flex-direction: column; gap: 6px; margin-top: 18px; }
+.m-actions .m-btn { flex: none; width: 100%; }
+.m-stepper { display: grid; grid-template-columns: 60px 1fr 60px; align-items: center; gap: 10px; margin-top: 20px; }
+.m-stepper button { height: 60px; border-radius: 30px; border: 0; background: var(--m-fill); color: var(--m-text); display: grid; place-items: center; min-height: 0; padding: 0; cursor: pointer; }
+.m-stepper input { height: 64px !important; text-align: center; font-size: 40px !important; font-weight: 700; border: 0 !important; background: transparent !important;
+  font-variant-numeric: tabular-nums; padding: 0 !important; box-shadow: none !important; }
+.m-unit { text-align: center; color: var(--m-text-2); font-size: 14px; margin-top: -2px; }
+.m-quick { display: flex; justify-content: center; gap: 8px; margin-top: 12px; }
+.m-quick button { height: 34px; padding: 0 14px; border-radius: 17px; border: 1px solid var(--m-line); background: var(--m-surface); color: var(--m-text); font-family: inherit; font-weight: 500; font-size: 14px; line-height: 1; min-height: 0; }
+.m-textlink { border: 0; background: none; color: var(--m-link); font-family: inherit; font-weight: 500; font-size: 15px; line-height: 1; padding: 12px 0 0; height: auto; min-height: 0; }
+.m-menu { list-style: none; margin: 0 -20px; padding: 0; }
+.m-menu button { width: 100%; display: flex; align-items: center; gap: 14px; height: 54px; padding: 0 20px; border: 0; border-radius: 0; background: none;
+  color: var(--m-text); font-family: inherit; font-weight: 400; font-size: 17px; line-height: 1; justify-content: flex-start; min-height: 0; }
+.m-menu li + li button { border-top: 1px solid var(--m-line); }
+.m-menu .ic { color: var(--m-text-2); }
+.m-menu .danger { color: var(--m-danger); }
+.m-menu .danger .ic { color: var(--m-danger); }
+.m-table { list-style: none; margin: 14px -20px 0; padding: 0; border-top: 1px solid var(--m-line); max-height: 40vh; overflow: auto; }
+.m-table li { display: flex; gap: 12px; padding: 10px 20px; border-bottom: 1px solid var(--m-line); font-size: 15px; }
+.m-table li span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-table li span:last-child { font-weight: 600; font-variant-numeric: tabular-nums; }
+.m-receipt { text-align: center; padding: 10px 0 4px; }
+.m-receipt .ok { width: 56px; height: 56px; border-radius: 28px; margin: 0 auto 12px; display: grid; place-items: center; background: color-mix(in srgb, var(--m-ok) 14%, transparent); color: var(--m-ok); }
+.m-receipt code { font-size: 13px; color: var(--m-text-2); }
+
+/* ---------- Inloggning och val av bolag (från common.js) ---------- */
+body.m .login { max-width: 440px; margin: 12px auto 0; padding: 0 20px; }
+body.m .login .card { background: transparent; border: 0; box-shadow: none; padding: 0; }
+body.m .login h2 { font-size: 28px; font-weight: 700; letter-spacing: -.02em; margin: 8px 0 4px; }
+body.m .login .muted { color: var(--m-text-2); font-size: 15px; }
+body.m .login label { color: var(--m-text-2); font-size: 13px; margin: 18px 0 6px; }
+body.m .login input { height: 50px; border-radius: 12px; border: 1px solid var(--m-line); background: var(--m-surface); color: var(--m-text); font-size: 17px; padding: 0 14px; }
+body.m .login button.big { height: 54px; border-radius: 14px; background: var(--m-primary); border-color: var(--m-primary); color: var(--m-on-primary); font-size: 17px; font-weight: 600; margin-top: 24px !important; }
+body.m .login .list { margin: 16px -20px 0; background: var(--m-surface); border-top: 1px solid var(--m-line); border-bottom: 1px solid var(--m-line); }
+body.m .login .list li { padding: 14px 20px; border-color: var(--m-line); }
+body.m .login .list button { height: 36px; border-radius: 18px; }
+body.m .login .list button.primary { background: var(--m-primary); border-color: var(--m-primary); color: var(--m-on-primary); }
+body.m .msg { border-radius: 12px; }
+
+/* app.css har en generell hover-färg för knappar – behåll mobilens egna färger vid tryck/hover. */
+body.m .m-btn-primary:hover:not(:disabled) { background: var(--m-primary); }
+body.m .m-btn-secondary:hover:not(:disabled), body.m .m-chip:hover:not(:disabled), body.m .m-quick button:hover:not(:disabled) { background: var(--m-surface); }
+body.m .m-chip[aria-pressed="true"]:hover:not(:disabled) { background: var(--m-primary); }
+body.m .m-btn-danger:hover:not(:disabled), body.m .m-btn-plain:hover:not(:disabled), body.m .m-menu button:hover:not(:disabled),
+body.m .m-search button:hover:not(:disabled), body.m .m-textlink:hover:not(:disabled), body.m .m-toast button:hover:not(:disabled) { background: transparent; }
+body.m .m-iconbtn:hover:not(:disabled), body.m .m-company:hover:not(:disabled), body.m .m-stepper button:hover:not(:disabled) { background: var(--m-fill); }

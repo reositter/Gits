@@ -12,8 +12,11 @@ const deviceId = (() => {
 })();
 
 let me, session, current = null, scanner = null, scanning = false, lastScan = { code: '', at: 0 };
+let view = { drafts: [], pending: [], subs: [], lines: [] };
 const prefs = Object.assign({ location: '', quickMode: false, sessionId: null }, store.get(PREFS_KEY, {}));
 const savePrefs = () => store.set(PREFS_KEY, prefs);
+const time = (t) => t ? new Date(t).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }) : '';
+const plural = (n, one, many) => `${fmt(n)} ${n === 1 ? one : many}`;
 
 // ---------- Offline-kö ----------
 // Varje rad får ett id i mobilen och läggs i kön innan den skickas. Servern ignorerar
@@ -35,20 +38,20 @@ async function flush() {
   if (!pending.length) return;
   flushing = true;
   try {
-    const bySession = Object.groupBy ? Object.groupBy(pending, (l) => l.sessionId) : pending.reduce((a, l) => ((a[l.sessionId] ??= []).push(l), a), {});
+    const bySession = pending.reduce((a, l) => ((a[l.sessionId] ??= []).push(l), a), {});
     for (const [sid, lines] of Object.entries(bySession)) {
       try {
-        const r = await api('POST', `/api/sessions/${sid}/lines`, lines.map(({ sessionId, name, ...l }) => l));
+        const r = await api('POST', `/api/sessions/${sid}/lines`, lines.map(({ sessionId, name, unit, ...l }) => l));
         queue.remove(r.accepted);
         if (r.rejected.length) {
           queue.remove(r.rejected.map((x) => x.id));
-          alert('Några rader avvisades av servern:\n' + r.rejected.map((x) => x.error).join('\n'));
+          toast('Rader avvisades: ' + r.rejected.map((x) => x.error).join(', '));
         }
       } catch (e) {
         if (e.status === 409 || e.status === 404) {
           // Inventeringen är stängd – raderna kan aldrig sparas.
           queue.remove(lines.map((l) => l.id));
-          alert(`${lines.length} rad(er) kunde inte sparas: ${e.message}`);
+          toast(`${plural(lines.length, 'rad', 'rader')} kunde inte sparas: ${e.message}`);
         } else if (e.status === 401) { location.reload(); return; }
         // Nätverksfel: försök igen senare.
       }
@@ -61,200 +64,265 @@ async function flush() {
 }
 function renderQueue() {
   const n = queue.all().length, b = $('#queueBadge');
-  b.innerHTML = `${icon('wifiOff', 14)}${n} ej skickade`;
+  b.innerHTML = `${icon('wifiOff', 15)}${n}`;
+  b.title = `${n} rader väntar på uppkoppling`;
   b.classList.toggle('hidden', n === 0);
 }
 setInterval(flush, 10000);
 window.addEventListener('online', flush);
 
-// ---------- Start ----------
 // Byt inte bolag medan rader väntar på att skickas – de hör till inventeringen i nuvarande bolag.
 window.beforeCompanySwitch = () => {
-  if (queue.all().length) { alert('Det finns rader som inte skickats än. Vänta tills du har uppkoppling och försök igen.'); return false; }
+  if (queue.all().length) { toast('Rader väntar på uppkoppling. Byt bolag när de har skickats.'); return false; }
   stopScanner();
   prefs.sessionId = null; savePrefs();
   return true;
 };
 
+// ---------- Ark (bottom sheet) och kvittens ----------
+const sheet = document.createElement('dialog');
+sheet.className = 'm-sheet';
+document.body.append(sheet);
+sheet.addEventListener('click', (e) => { if (e.target === sheet) closeSheet(); }); // klick på bakgrunden
+sheet.addEventListener('cancel', (e) => { e.preventDefault(); closeSheet(); });
+let onSheetClose = null;
+function openSheet(html, onClose) {
+  sheet.innerHTML = `<div class="m-grab"></div>${html}`;
+  onSheetClose = onClose ?? null;
+  if (!sheet.open) sheet.showModal();
+}
+function closeSheet() {
+  if (sheet.open) sheet.close();
+  const f = onSheetClose; onSheetClose = null; f?.();
+}
+
+const toastEl = document.createElement('div');
+toastEl.className = 'm-toast'; toastEl.hidden = true; toastEl.setAttribute('role', 'status');
+document.body.append(toastEl);
+function toast(text, action) {
+  toastEl.innerHTML = `<span>${esc(text)}</span>${action ? `<button type="button">${esc(action.label)}</button>` : ''}`;
+  if (action) toastEl.querySelector('button').onclick = () => { toastEl.hidden = true; action.run(); };
+  toastEl.hidden = false;
+  clearTimeout(toast.t);
+  toast.t = setTimeout(() => { toastEl.hidden = true; }, action ? 5000 : 2800);
+}
+
+// ---------- Start ----------
 async function start() {
   me = await ensureLoggedIn(main);
-  $('#logoutBtn').classList.remove('hidden');
   $('#logoutBtn').onclick = logout;
+  const menu = $('#menuBtn');
+  menu.innerHTML = icon('more', 20);
+  menu.classList.remove('hidden');
+  menu.onclick = openMenu;
   renderQueue();
   flush();
   await chooseSession();
 }
 
-async function chooseSession() {
+function openMenu() {
+  const canSwitch = me.companies.length > 1;
+  openSheet(`
+    <h2>${esc(me.displayName || me.userName)}</h2>
+    <div class="m-sub">${esc(me.company?.name ?? '')}</div>
+    <ul class="m-menu" style="margin-top:12px">
+      ${session ? `<li><button data-a="session">${icon('file', 20)}Byt inventering</button></li>` : ''}
+      ${canSwitch ? `<li><button data-a="company">${icon('building', 20)}Byt bolag</button></li>` : ''}
+      ${me.role === 'Admin' ? `<li><button data-a="admin">${icon('sheet', 20)}Administration</button></li>` : ''}
+      <li><button data-a="logout" class="danger">${icon('logout', 20)}Logga ut</button></li>
+    </ul>`);
+  sheet.querySelectorAll('button[data-a]').forEach((b) => b.onclick = () => {
+    const a = b.dataset.a;
+    closeSheet();
+    if (a === 'session') { stopScanner(); prefs.sessionId = null; savePrefs(); session = null; chooseSession(true); }
+    if (a === 'company') $('#companyBtn').click();
+    if (a === 'admin') location.href = '/admin.html';
+    if (a === 'logout') logout();
+  });
+}
+
+async function chooseSession(force = false) {
   const sessions = await api('GET', '/api/sessions/open');
-  if (sessions.length === 1 || sessions.some((s) => s.id === prefs.sessionId)) {
+  if (!force && (sessions.length === 1 || sessions.some((s) => s.id === prefs.sessionId))) {
     session = sessions.find((s) => s.id === prefs.sessionId) ?? sessions[0];
     return renderCount();
   }
   main.innerHTML = `
-    <div class="card">
-      <h2>Välj inventering</h2>
-      ${sessions.length ? `<ul class="list">${sessions.map((s) => `
-        <li><div class="grow"><b>${esc(s.name)}</b><div class="secondary">Startad ${fmtTime(s.createdAt)}</div></div>
-        <button class="primary shrink" data-id="${s.id}">Välj</button></li>`).join('')}</ul>`
-        : `<p class="muted">Det finns ingen öppen inventering just nu.</p>`}
-      <div class="toolbar" style="margin-top:14px">
-        <button id="reload">${icon('refresh', 16)}Uppdatera</button>
-        ${me.role === 'Admin' ? `<a class="btn" href="/admin.html">Administration</a>` : ''}
-      </div>
-    </div>`;
-  main.querySelectorAll('button[data-id]').forEach((b) => b.onclick = () => {
-    session = sessions.find((s) => s.id === Number(b.dataset.id));
+    <div class="m-hero"><h1>Inventeringar</h1><p class="m-meta">${esc(me.company?.name ?? '')}</p></div>
+    ${sessions.length ? `<ul class="m-list">${sessions.map((s) => `
+      <li class="m-row" data-id="${s.id}"><div class="m-row-main"><div class="m-row-t">${esc(s.name)}</div>
+      <div class="m-row-s">Startad ${fmtTime(s.createdAt)}</div></div><span class="chev">${icon('chevron', 18)}</span></li>`).join('')}</ul>`
+      : `<div class="m-empty">Det finns ingen pågående inventering i ${esc(me.company?.name ?? 'bolaget')} just nu.</div>`}
+    <div class="m-dock"><button class="m-btn m-btn-secondary" id="reload" style="flex:1">${icon('refresh', 18)}Uppdatera</button></div>`;
+  main.querySelectorAll('[data-id]').forEach((li) => li.onclick = () => {
+    session = sessions.find((s) => s.id === Number(li.dataset.id));
     prefs.sessionId = session.id; savePrefs(); renderCount();
   });
-  $('#reload').onclick = chooseSession;
+  $('#reload').onclick = () => chooseSession(force);
 }
 
 // ---------- Räkning ----------
 function renderCount() {
   prefs.sessionId = session.id; savePrefs();
   main.innerHTML = `
-    <div class="page-head" style="margin:0 0 12px"><div><h1 style="font-size:19px">${esc(session.name)}</h1><div class="sub">${esc(me.company?.name ?? '')}</div></div></div>
-    <div class="card">
-      <div id="reader" class="hidden"></div>
-      <div class="row" style="margin-top:8px">
-        <button id="scanBtn" class="primary big scan-btn">${icon('camera', 20)}Skanna streckkod</button>
-      </div>
-      <form id="manual" class="row" style="margin-top:12px" autocomplete="off">
-        <input id="code" placeholder="Artikelnr, EAN eller benämning" enterkeyhint="search" autocapitalize="none">
-        <button class="shrink" aria-label="Sök">${icon('search', 16)}Sök</button>
-      </form>
-      <div id="results"></div>
-      <div class="row" style="margin-top:10px">
-        <label class="check shrink" style="margin:0" title="Varje skanning sparas direkt som 1 st – skanna en gång per förpackning. Antalet kan ändras i efterhand."><input type="checkbox" id="quick"> Snabbläge</label>
-        <input id="loc" placeholder="Plats / hylla (valfritt)" value="${esc(prefs.location)}">
-      </div>
-    </div>
-    <form id="entry" class="card hidden" autocomplete="off">
-      <div class="article" id="artName"></div>
-      <div class="muted" id="artMeta"></div>
-      <label for="qty">Antal</label>
-      <div class="qty">
-        <button type="button" id="minus" aria-label="Minska">${icon('minus', 20)}</button>
-        <input id="qty" type="number" inputmode="decimal" step="any" min="0" required>
-        <button type="button" id="plus" aria-label="Öka">${icon('plus', 20)}</button>
-      </div>
-      <label for="comment">Kommentar (valfritt)</label>
-      <input id="comment" maxlength="500">
-      <div class="row" style="margin-top:16px">
-        <button type="button" id="cancelEntry" class="big">Avbryt</button>
-        <button class="primary big" id="saveEntry">Spara</button>
-      </div>
+    <div class="m-hero"><h1>${esc(session.name)}</h1><p class="m-meta" id="meta">&nbsp;</p></div>
+    <form id="manual" class="m-search" autocomplete="off" role="search">
+      ${icon('search', 18)}
+      <input id="code" placeholder="Sök artikel eller skriv EAN" enterkeyhint="search" autocapitalize="none" autocorrect="off" spellcheck="false">
+      <button type="submit" id="searchBtn" hidden>Sök</button>
     </form>
-    <div id="flash"></div>
-    <dialog id="submitDlg"></dialog>
-    <div class="card">
-      <div class="card-head"><h2>Mina rader</h2><button class="small" id="switch">Byt inventering</button></div>
-      <ul class="list" id="mylines"><li class="muted">Laddar…</li></ul>
+    <div class="m-chips">
+      <button type="button" class="m-chip" id="locChip">${icon('pin', 15)}<span></span></button>
+      <button type="button" class="m-chip" id="quickChip">${icon('bolt', 15)}Snabbläge</button>
+    </div>
+    <div id="reader" class="m-reader hidden"></div>
+    <div id="results"></div>
+    <div id="lists"><div class="m-empty">Laddar…</div></div>
+    <div class="m-dock">
+      <button type="button" class="m-btn m-btn-secondary hidden" id="submitBtn"></button>
+      <button type="button" class="m-btn m-btn-primary" id="scanBtn">${icon('camera', 20)}Skanna</button>
     </div>`;
 
-  $('#quick').checked = prefs.quickMode;
-  $('#quick').onchange = (e) => { prefs.quickMode = e.target.checked; savePrefs(); };
-  $('#loc').onchange = (e) => { prefs.location = e.target.value.trim(); savePrefs(); };
+  const code = $('#code');
+  code.addEventListener('input', () => { $('#searchBtn').hidden = !code.value; });
+  $('#manual').onsubmit = (e) => { e.preventDefault(); lookup(code.value, 'manual'); code.blur(); };
   $('#scanBtn').onclick = toggleScanner;
-  $('#manual').onsubmit = (e) => { e.preventDefault(); lookup($('#code').value, 'manual'); };
-  $('#minus').onclick = () => stepQty(-1);
-  $('#plus').onclick = () => stepQty(1);
-  $('#cancelEntry').onclick = closeEntry;
-  $('#entry').onsubmit = (e) => { e.preventDefault(); saveEntry(); };
-  $('#switch').onclick = () => { stopScanner(); prefs.sessionId = null; savePrefs(); session = null; chooseSession(); };
-  $('#qty').addEventListener('focus', (e) => e.target.select());
-  $('#code').focus(); // Handskannrar i tangentbordsläge skriver hit och skickar Enter.
+  $('#submitBtn').onclick = submitSheet;
+  $('#locChip').onclick = locationSheet;
+  $('#quickChip').onclick = () => {
+    prefs.quickMode = !prefs.quickMode; savePrefs(); renderChips();
+    toast(prefs.quickMode ? 'Snabbläge: varje skanning sparas direkt som 1 st.' : 'Snabbläge av: du anger antal efter varje skanning.');
+  };
+  renderChips();
   loadMyLines();
 }
 
-function stepQty(d) {
-  const el = $('#qty');
-  el.value = Math.max(0, (parseFloat(el.value.replace(',', '.')) || 0) + d);
+function renderChips() {
+  $('#locChip span').textContent = prefs.location ? `Plats ${prefs.location}` : 'Ange plats';
+  $('#locChip').setAttribute('aria-pressed', String(!!prefs.location));
+  $('#quickChip').setAttribute('aria-pressed', String(!!prefs.quickMode));
+}
+
+function locationSheet() {
+  openSheet(`
+    <form id="lf">
+      <h2>Plats</h2>
+      <div class="m-sub">Hylla eller lagerplats du räknar på. Sparas på varje rad och hjälper till att hitta dubbelräkning.</div>
+      <label for="lv">Plats</label>
+      <input id="lv" value="${esc(prefs.location)}" placeholder="t.ex. A3" autocapitalize="characters">
+      <div class="m-actions">
+        <button class="m-btn m-btn-primary">Använd</button>
+        ${prefs.location ? `<button type="button" class="m-btn m-btn-plain" id="lclear">Ingen plats</button>` : ''}
+      </div>
+    </form>`);
+  $('#lv', sheet).focus();
+  $('#lf', sheet).onsubmit = (e) => { e.preventDefault(); prefs.location = $('#lv', sheet).value.trim(); savePrefs(); renderChips(); closeSheet(); };
+  $('#lclear', sheet)?.addEventListener('click', () => { prefs.location = ''; savePrefs(); renderChips(); closeSheet(); });
 }
 
 async function lookup(code, source) {
   code = code.trim();
   if (!code) return;
-  showMsg($('#results'), '');
+  $('#results').innerHTML = '';
   try {
     const a = await api('GET', `/api/articles/lookup?code=${encodeURIComponent(code)}`);
     found(a, code, source);
   } catch (e) {
-    if (e.status !== 404) return showMsg($('#results'), e.message);
-    // Ingen exakt träff → sök på namn/artikelnr (artiklar utan EAN).
+    if (e.status !== 404) return note(e.message, true);
+    // Ingen exakt träff: sök på namn/artikelnr (artiklar utan streckkod).
     const hits = await api('GET', `/api/articles/search?q=${encodeURIComponent(code)}`).catch(() => []);
-    if (!hits.length) {
-      buzz([200, 100, 200]);
-      return showMsg($('#results'), `Hittar ingen artikel för "${code}".`);
-    }
-    $('#results').innerHTML = `<ul class="list">${hits.map((a, i) => `
-      <li><div class="grow"><b>${esc(a.articleNo)}</b> ${esc(a.name)}<div class="muted">${esc(a.ean ?? 'Ingen EAN')}</div></div>
-      <button class="shrink" data-i="${i}">Välj</button></li>`).join('')}</ul>`;
-    $('#results').querySelectorAll('button').forEach((b) => b.onclick = () => found({ ...hits[b.dataset.i], via: 'Sökning' }, code, 'search'));
+    if (!hits.length) { buzz([200, 100, 200]); return note(`Ingen artikel matchar "${code}".`, true); }
+    $('#results').innerHTML = `
+      <div class="m-section"><div class="m-section-h"><b>Sökresultat</b><span>${hits.length}</span></div>
+      <ul class="m-list">${hits.map((a, i) => `
+        <li class="m-row m-hit" data-i="${i}"><div class="m-row-main"><div class="m-row-t">${esc(a.name)}</div>
+        <div class="m-row-s">${esc(a.articleNo)}${a.ean ? ' · ' + esc(a.ean) : ''}</div></div><span class="chev">${icon('chevron', 18)}</span></li>`).join('')}</ul></div>`;
+    $('#results').querySelectorAll('[data-i]').forEach((li) => li.onclick = () => found({ ...hits[li.dataset.i], via: 'Sökning' }, code, 'search'));
   }
 }
 
+function note(text, bad) { $('#results').innerHTML = `<div class="m-note ${bad ? 'bad' : ''}">${esc(text)}</div>`; }
+
 function found(a, code, source) {
   $('#results').innerHTML = '';
-  $('#code').value = '';
-  buzz(60);
-  if (!a.isStockItem) return showMsg($('#results'), `${a.articleNo} ${a.name} är inte en lagerartikel.`, 'warn');
+  $('#code').value = ''; $('#searchBtn').hidden = true;
+  buzz(40);
+  if (!a.isStockItem) return note(`${a.articleNo} ${a.name} är inte en lagerartikel.`, true);
   if (prefs.quickMode && source === 'scan') {
     const q = a.quantity ?? 1;
     const line = addLine(a, code, q, '');
-    flash(`+${fmt(q)} ${a.articleNo} ${a.name}`, () => openEntry({ article: a, code, edit: line }));
+    toast(`+${fmt(q)}  ${a.name}`, { label: 'Ändra', run: () => openEntry({ article: a, code, edit: line }) });
     return;
   }
   openEntry({ article: a, code });
 }
 
-/** Öppnar antalsformuläret – för ny rad, eller för att ändra en befintlig (current.edit). */
+/** Ark för antal – ny rad, eller ändra en befintlig (c.edit). */
 function openEntry(c) {
   current = c;
   pauseScanner();
   const a = c.article;
-  $('#artName').textContent = `${a.articleNo} – ${a.name ?? ''}`;
-  $('#artMeta').textContent = c.edit ? 'Ändra antal'
-    : [a.ean ? `EAN ${a.ean}` : 'Ingen EAN', a.unit, a.via && !['EAN', 'Artikelnr'].includes(a.via) ? a.via : null].filter(Boolean).join(' · ');
-  $('#qty').value = c.edit ? c.edit.quantity : (a.quantity ?? 1);
-  $('#comment').value = c.edit?.comment ?? '';
-  $('#saveEntry').textContent = c.edit ? 'Spara ändring' : 'Spara';
-  $('#entry').classList.remove('hidden');
-  $('#entry').scrollIntoView({ block: 'nearest' });
-  $('#qty').focus();
-  $('#qty').select();
+  const qty = c.edit ? c.edit.quantity : (a.quantity ?? 1);
+  const via = a.via && !['EAN', 'Artikelnr', 'Sökning'].includes(a.via) ? a.via : null;
+  openSheet(`
+    <form id="entry" autocomplete="off">
+      <h2>${esc(a.name ?? '')}</h2>
+      <div class="m-sub">${[esc(a.articleNo), a.ean ? 'EAN ' + esc(a.ean) : null, prefs.location && !c.edit ? 'Plats ' + esc(prefs.location) : null, via ? esc(via) : null].filter(Boolean).join(' · ')}</div>
+      <div class="m-stepper">
+        <button type="button" id="minus" aria-label="Minska">${icon('minus', 22)}</button>
+        <input id="qty" type="number" inputmode="decimal" step="any" min="0" value="${qty}" required aria-label="Antal">
+        <button type="button" id="plus" aria-label="Öka">${icon('plus', 22)}</button>
+      </div>
+      <div class="m-unit">${esc(a.unit ?? 'st')}</div>
+      <div id="commentWrap" ${c.edit?.comment ? '' : 'hidden'}><label for="comment">Kommentar</label><input id="comment" maxlength="500" value="${esc(c.edit?.comment ?? '')}"></div>
+      ${c.edit?.comment ? '' : `<button type="button" class="m-textlink" id="addComment">Lägg till kommentar</button>`}
+      <div class="m-actions">
+        <button class="m-btn m-btn-primary" id="saveEntry">${c.edit ? 'Spara ändring' : 'Spara'}</button>
+        ${c.edit && !c.edit.pending ? `<button type="button" class="m-btn m-btn-danger" id="delEntry">Ta bort raden</button>` : ''}
+      </div>
+    </form>`, () => { current = null; if (scanning) resumeScanner(); });
+  const q = $('#qty', sheet);
+  q.focus(); q.select();
+  $('#minus', sheet).onclick = () => step(-1);
+  $('#plus', sheet).onclick = () => step(1);
+  $('#addComment', sheet)?.addEventListener('click', (e) => { e.target.remove(); $('#commentWrap', sheet).hidden = false; $('#comment', sheet).focus(); });
+  $('#entry', sheet).onsubmit = (e) => { e.preventDefault(); saveEntry(); };
+  $('#delEntry', sheet)?.addEventListener('click', () => deleteLine(c.edit.id));
+}
+
+function step(d) {
+  const el = $('#qty', sheet);
+  el.value = Math.max(0, (parseFloat(String(el.value).replace(',', '.')) || 0) + d);
 }
 
 async function saveEntry() {
-  const qty = parseFloat(String($('#qty').value).replace(',', '.'));
-  if (!Number.isFinite(qty) || qty < 0) return $('#qty').focus();
-  const comment = $('#comment').value.trim() || null;
+  const qty = parseFloat(String($('#qty', sheet).value).replace(',', '.'));
+  if (!Number.isFinite(qty) || qty < 0) return $('#qty', sheet).focus();
+  const comment = $('#comment', sheet)?.value.trim() || null;
   const { article, code, edit } = current;
   if (edit) {
     // Ej skickad rad ändras i kön; skickad rad ändras på servern.
     if (!queue.update(edit.id, { quantity: qty, comment })) {
       try { await api('PATCH', `/api/sessions/${session.id}/lines/${edit.id}`, { quantity: qty, comment }); }
-      catch (e) { return showMsg($('#flash'), e.message); }
+      catch (e) { closeSheet(); return toast(e.message); }
     }
-    flash(`Ändrat: ${fmt(qty)} × ${article.articleNo} ${article.name ?? ''}`);
+    toast(`Ändrat till ${fmt(qty)}  ${article.name ?? ''}`);
   } else {
     addLine(article, code, qty, comment);
-    flash(`Sparat: ${fmt(qty)} × ${article.articleNo} ${article.name}`);
+    toast(`Sparat ${fmt(qty)}  ${article.name}`);
   }
-  closeEntry();
+  closeSheet();
   loadMyLines();
 }
 
-function closeEntry() {
-  current = null;
-  $('#entry').classList.add('hidden');
-  if (scanning) resumeScanner(); else $('#code').focus();
+async function deleteLine(id) {
+  try { await api('DELETE', `/api/sessions/${session.id}/lines/${id}`); closeSheet(); toast('Raden togs bort'); loadMyLines(); }
+  catch (e) { closeSheet(); toast(e.message); }
 }
 
 function addLine(a, code, qty, comment) {
   const line = {
-    id: crypto.randomUUID(), sessionId: session.id, articleNo: a.articleNo, name: a.name, scannedCode: code, scanVia: a.via ?? null,
+    id: crypto.randomUUID(), sessionId: session.id, articleNo: a.articleNo, name: a.name, unit: a.unit, scannedCode: code, scanVia: a.via ?? null,
     quantity: qty, location: prefs.location || null, comment: comment || null,
     countedAt: new Date().toISOString(), deviceId,
   };
@@ -263,16 +331,8 @@ function addLine(a, code, qty, comment) {
   return line;
 }
 
-function flash(text, onEdit) {
-  const el = $('#flash');
-  el.innerHTML = `<div class="msg ok row"><span>${esc(text)}</span>${onEdit ? '<button class="small shrink" id="flashEdit">Ändra antal</button>' : ''}</div>`;
-  if (onEdit) $('#flashEdit').onclick = () => { el.innerHTML = ''; onEdit(); };
-  clearTimeout(flash.t);
-  flash.t = setTimeout(() => { el.innerHTML = ''; }, onEdit ? 6000 : 3000);
-}
-
 async function loadMyLines() {
-  const el = $('#mylines');
+  const el = $('#lists');
   if (!el) return;
   const pending = queue.all().filter((l) => l.sessionId === session.id);
   let lines = [], subs = [];
@@ -281,90 +341,98 @@ async function loadMyLines() {
       api('GET', `/api/sessions/${session.id}/mylines`),
       api('GET', `/api/sessions/${session.id}/mysubmissions`),
     ]);
-  } catch { /* offline */ }
+  } catch { /* offline – visa det vi har */ }
   const drafts = lines.filter((l) => !l.submissionId);
+  view = { drafts, pending, subs, lines };
   const draftCount = drafts.length + pending.length;
-  const lineRow = (l, opts) => `<li ${opts.edit ? `data-edit="${l.id}"` : ''}><div class="grow"><b>${esc(l.articleNo)}</b> ${esc(l.name)}
-      <div class="muted">${opts.pending ? 'Väntar på uppkoppling' : fmtTime(l.countedAt)}${l.location ? ' · ' + esc(l.location) : ''}${l.comment ? ' · ' + esc(l.comment) : ''}</div></div>
-      ${opts.edit ? `<button class="small shrink qtybtn">${fmt(l.quantity)} ${icon('edit', 13)}</button>` : `<span class="num">${fmt(l.quantity)}</span>`}
-      ${opts.del ? `<button class="icon-btn danger shrink" data-id="${l.id}" aria-label="Ta bort">${icon('x', 15)}</button>` : ''}</li>`;
+
+  const row = (l, pendingRow) => `
+    <li class="m-row ${pendingRow ? 'pending' : ''}" data-edit="${l.id}">
+      <div class="m-row-main"><div class="m-row-t">${esc(l.name ?? l.articleNo)}</div>
+      <div class="m-row-s">${[esc(l.articleNo), l.location ? esc(l.location) : null, pendingRow ? 'väntar på uppkoppling' : time(l.countedAt), l.comment ? esc(l.comment) : null].filter(Boolean).join(' · ')}</div></div>
+      <div class="m-qty">${fmt(l.quantity)}</div>
+    </li>`;
 
   el.innerHTML = `
-    <li class="section-label" style="display:block;border:0">Ej inlämnade · ${draftCount}</li>
-    ${pending.map((l) => lineRow(l, { pending: true, edit: true })).join('')}
-    ${drafts.map((l) => lineRow(l, { edit: true, del: true })).join('')}
-    ${draftCount ? `<li style="display:block"><button class="primary big" id="submitBtn" ${pending.length ? 'disabled' : ''}>
-        ${pending.length ? 'Väntar på uppkoppling…' : `${icon('sign', 18)}Signera och lämna in ${drafts.length} ${drafts.length === 1 ? 'rad' : 'rader'}`}</button></li>` : ''}
-    ${subs.length ? `<li class="section-label" style="display:block;border:0;padding-top:20px">Inlämnade · ${subs.length}</li>` : ''}
-    ${subs.map((sub) => `
-      <li style="display:block">
-        <details>
-          <summary>${icon('chevron', 16)}<div><b>Inlämning #${sub.id}</b> · ${sub.lineCount} rader · totalt ${fmt(sub.totalQuantity)}
-            <div class="secondary">${fmtTime(sub.submittedAt)} · kvitto ${esc(sub.hash.slice(0, 10))} · ${icon('lock', 12)} låst</div></div></summary>
-          <ul class="list">${lines.filter((l) => l.submissionId === sub.id).map((l) => lineRow(l, {})).join('')}</ul>
-        </details>
-      </li>`).join('')}
-    ${draftCount === 0 && subs.length === 0 ? '<li class="muted">Inga rader ännu.</li>' : ''}`;
+    ${draftCount ? `
+      <div class="m-section"><div class="m-section-h"><b>Att lämna in</b><span>tryck på en rad för att ändra</span></div>
+      <ul class="m-list">${pending.map((l) => row(l, true)).join('')}${drafts.map((l) => row(l, false)).join('')}</ul></div>` : ''}
+    ${subs.length ? `
+      <div class="m-section"><div class="m-section-h"><b>Inlämnat</b><span>${plural(subs.length, 'inlämning', 'inlämningar')}</span></div>
+      <ul class="m-list">${subs.map((s) => `
+        <li class="m-row" data-sub="${s.id}"><div class="m-row-main"><div class="m-row-t">Inlämning ${s.id}</div>
+        <div class="m-row-s">${fmtTime(s.submittedAt)} · ${plural(s.lineCount, 'rad', 'rader')}</div></div>
+        <div class="m-qty">${fmt(s.totalQuantity)}</div><span class="chev">${icon('chevron', 18)}</span></li>`).join('')}</ul></div>` : ''}
+    ${!draftCount && !subs.length ? `<div class="m-empty">Skanna en streckkod eller sök efter en artikel för att börja räkna.</div>` : ''}`;
 
   const all = [...pending, ...drafts];
-  el.querySelectorAll('li[data-edit]').forEach((li) => li.onclick = (e) => {
-    if (e.target.closest('button[data-id]')) return;
+  el.querySelectorAll('[data-edit]').forEach((li) => li.onclick = () => {
     const l = all.find((x) => x.id === li.dataset.edit);
-    openEntry({ article: { articleNo: l.articleNo, name: l.name }, code: l.scannedCode, edit: { id: l.id, quantity: l.quantity, comment: l.comment } });
+    openEntry({ article: { articleNo: l.articleNo, name: l.name, unit: l.unit }, code: l.scannedCode,
+      edit: { id: l.id, quantity: l.quantity, comment: l.comment, pending: pending.includes(l) } });
   });
-  el.querySelectorAll('button[data-id]').forEach((b) => b.onclick = async () => {
-    if (!confirm('Ta bort raden?')) return;
-    try { await api('DELETE', `/api/sessions/${session.id}/lines/${b.dataset.id}`); loadMyLines(); }
-    catch (e) { alert(e.message); }
-  });
-  $('#submitBtn')?.addEventListener('click', () => submitDialog(drafts));
+  el.querySelectorAll('[data-sub]').forEach((li) => li.onclick = () => receiptSheet(subs.find((s) => s.id === Number(li.dataset.sub)), lines));
+
+  const total = lines.length + pending.length;
+  $('#meta').innerHTML = total ? `${plural(total, 'rad', 'rader')}${draftCount ? ` · <b>${fmt(draftCount)} att lämna in</b>` : ' · allt inlämnat'}` : 'Inga rader ännu';
+  const sb = $('#submitBtn');
+  sb.classList.toggle('hidden', draftCount === 0);
+  sb.disabled = pending.length > 0;
+  sb.innerHTML = pending.length ? `${icon('wifiOff', 18)}Väntar` : `Lämna in ${fmt(drafts.length)}`;
+}
+
+function receiptSheet(s, lines) {
+  const mine = lines.filter((l) => l.submissionId === s.id);
+  openSheet(`
+    <h2>Inlämning ${s.id}</h2>
+    <div class="m-sub">${fmtTime(s.submittedAt)} · ${plural(s.lineCount, 'rad', 'rader')} · totalt ${fmt(s.totalQuantity)} · låst</div>
+    <ul class="m-table">${mine.map((l) => `<li><span>${esc(l.name ?? l.articleNo)}</span><span>${fmt(l.quantity)}</span></li>`).join('')}</ul>
+    <p class="m-sub" style="margin-top:12px">Kvitto <code>${esc(s.hash.slice(0, 12))}</code>. Kontakta administratören om något behöver ändras.</p>
+    <div class="m-actions"><button class="m-btn m-btn-secondary" id="ok">Stäng</button></div>`);
+  $('#ok', sheet).onclick = closeSheet;
 }
 
 /** Signera inlämning: visar exakt vilka rader som lämnas in och kräver lösenord. */
-function submitDialog(drafts) {
+function submitSheet() {
+  const drafts = view.drafts;
+  if (!drafts.length) return;
   stopScanner();
   const total = drafts.reduce((n, l) => n + Number(l.quantity), 0);
-  const dlg = $('#submitDlg');
-  dlg.innerHTML = `
+  openSheet(`
     <form id="subForm">
-      <h2>Lämna in räkning</h2>
-      <p>Du lämnar in <b>${drafts.length} rader</b> (totalt ${fmt(total)}) i <b>${esc(session.name)}</b>.
-      Efter inlämning är raderna låsta och kan bara ändras av admin.</p>
-      <div class="table-wrap" style="max-height:40vh;overflow:auto"><table>
-        <thead><tr><th>Artikel</th><th>Plats</th><th class="n">Antal</th></tr></thead>
-        <tbody>${drafts.map((l) => `<tr><td><b>${esc(l.articleNo)}</b> ${esc(l.name)}</td><td>${esc(l.location)}</td><td class="n">${fmt(l.quantity)}</td></tr>`).join('')}</tbody>
-      </table></div>
+      <h2>Lämna in ${plural(drafts.length, 'rad', 'rader')}</h2>
+      <div class="m-sub">Totalt ${fmt(total)} i ${esc(session.name)}. Efter inlämning är raderna låsta och kan bara ändras av administratören.</div>
+      <ul class="m-table">${drafts.map((l) => `<li><span>${esc(l.name ?? l.articleNo)}${l.location ? ` <span class="m-sub">· ${esc(l.location)}</span>` : ''}</span><span>${fmt(l.quantity)}</span></li>`).join('')}</ul>
       <label for="subComment">Kommentar (valfritt)</label>
-      <input id="subComment" maxlength="500">
-      <label for="subPw">Ditt lösenord – signerar att räkningen är korrekt</label>
+      <input id="subComment" maxlength="500" placeholder="t.ex. Gång A klar">
+      <label for="subPw">Ditt lösenord</label>
       <input id="subPw" type="password" autocomplete="current-password" required>
       <div id="subMsg"></div>
-      <div class="dialog-actions">
-        <button type="button" id="subCancel">Avbryt</button>
-        <button class="primary" id="subOk">${icon('sign', 16)}Signera och lämna in</button>
-      </div>
-    </form>`;
-  dlg.showModal();
-  $('#subPw', dlg).focus();
-  $('#subCancel', dlg).onclick = () => dlg.close();
-  $('#subForm', dlg).onsubmit = async (e) => {
+      <div class="m-actions"><button class="m-btn m-btn-primary" id="subOk">Signera och lämna in</button></div>
+    </form>`);
+  $('#subPw', sheet).focus();
+  $('#subForm', sheet).onsubmit = async (e) => {
     e.preventDefault();
-    $('#subOk', dlg).disabled = true;
+    $('#subOk', sheet).disabled = true;
     try {
       const r = await api('POST', `/api/sessions/${session.id}/submit`, {
-        password: $('#subPw', dlg).value, lineIds: drafts.map((l) => l.id), deviceId, comment: $('#subComment', dlg).value || null,
+        password: $('#subPw', sheet).value, lineIds: drafts.map((l) => l.id), deviceId, comment: $('#subComment', sheet).value || null,
       });
-      dlg.innerHTML = `<h2>${icon('check', 20)} Inlämnat</h2>
-        <p><b>Inlämning #${r.id}</b><br>${fmtTime(r.submittedAt)} · ${r.lineCount} rader · totalt ${fmt(r.totalQuantity)}</p>
-        <p class="muted">Kvitto: <code>${esc(r.hash.slice(0, 12))}</code></p>
-        <button class="primary big" id="subDone">OK</button>`;
-      $('#subDone', dlg).onclick = () => dlg.close();
-      buzz([60, 60, 60]);
+      buzz([40, 60, 40]);
+      openSheet(`
+        <div class="m-receipt">
+          <div class="ok">${icon('check', 28)}</div>
+          <h2>Inlämnat</h2>
+          <div class="m-sub">Inlämning ${r.id} · ${plural(r.lineCount, 'rad', 'rader')} · totalt ${fmt(r.totalQuantity)}</div>
+          <p><code>Kvitto ${esc(r.hash.slice(0, 12))}</code></p>
+        </div>
+        <div class="m-actions"><button class="m-btn m-btn-primary" id="subDone">Klar</button></div>`);
+      $('#subDone', sheet).onclick = closeSheet;
       loadMyLines();
     } catch (err) {
-      showMsg($('#subMsg', dlg), err.status === 409 ? err.message + ' ' : err.message);
-      $('#subOk', dlg).disabled = false;
-      if (err.status === 409) { dlg.close(); loadMyLines(); alert(err.message); }
+      if (err.status === 409) { closeSheet(); loadMyLines(); toast(err.message); return; }
+      showMsg($('#subMsg', sheet), err.message);
+      $('#subOk', sheet).disabled = false;
     }
   };
 }
@@ -380,9 +448,7 @@ const FORMATS = () => [
 async function toggleScanner() { scanning ? stopScanner() : startScanner(); }
 
 async function startScanner() {
-  if (!window.isSecureContext) {
-    return showMsg($('#results'), 'Kameran kräver HTTPS. Använd sökfältet eller en handskanner, eller öppna sidan via https://.', 'warn');
-  }
+  if (!window.isSecureContext) return note('Kameran kräver en säker anslutning (https). Använd sökfältet eller en handskanner så länge.', true);
   $('#reader').classList.remove('hidden');
   scanner ??= new Html5Qrcode('reader', { formatsToSupport: FORMATS(), experimentalFeatures: { useBarCodeDetectorIfSupported: true }, verbose: false });
   try {
@@ -390,10 +456,11 @@ async function startScanner() {
       { fps: 10, qrbox: (w, h) => ({ width: Math.floor(w * 0.85), height: Math.floor(Math.min(h, w) * 0.45) }) },
       onScan, () => {});
     scanning = true;
-    $('#scanBtn').innerHTML = `${icon('stop', 20)}Stoppa kamera`;
+    $('#scanBtn').innerHTML = `${icon('stop', 20)}Stoppa`;
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   } catch (e) {
     $('#reader').classList.add('hidden');
-    showMsg($('#results'), 'Kunde inte starta kameran: ' + (e?.message ?? e));
+    note('Kunde inte starta kameran: ' + (e?.message ?? e), true);
   }
 }
 
@@ -401,7 +468,7 @@ async function stopScanner() {
   if (scanner && scanning) { try { await scanner.stop(); } catch { } }
   scanning = false;
   $('#reader')?.classList.add('hidden');
-  const b = $('#scanBtn'); if (b) b.innerHTML = `${icon('camera', 20)}Skanna streckkod`;
+  const b = $('#scanBtn'); if (b) b.innerHTML = `${icon('camera', 20)}Skanna`;
 }
 function pauseScanner() { if (scanning) try { scanner.pause(true); } catch { } }
 function resumeScanner() { if (scanning) try { scanner.resume(); } catch { } }
@@ -414,6 +481,20 @@ function onScan(text) {
   if (current) return;
   lookup(text, 'scan');
 }
+
+// Handskannrar i tangentbordsläge "skriver" koden snabbt och avslutar med Enter. Fånga det även
+// när inget fält har fokus, så att mobilens tangentbord inte behöver vara uppe.
+let wedge = { buf: '', at: 0 };
+document.addEventListener('keydown', (e) => {
+  if (!session || sheet.open || e.target.closest?.('input, textarea, select')) return;
+  const now = Date.now();
+  if (now - wedge.at > 80) wedge.buf = '';
+  wedge.at = now;
+  if (e.key === 'Enter') {
+    if (wedge.buf.length >= 3) { e.preventDefault(); lookup(wedge.buf, 'scan'); }
+    wedge.buf = '';
+  } else if (e.key.length === 1) wedge.buf += e.key;
+});
 
 function buzz(p) { try { navigator.vibrate?.(p); } catch { } }
 
