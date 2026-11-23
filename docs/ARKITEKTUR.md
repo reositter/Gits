@@ -48,7 +48,12 @@ Därför:
 3. Admin ser per artikel: systemsaldo vid start, räknat totalt, differens, vem som räknat vad.
    Flaggor: stor avvikelse, samma artikel räknad på samma plats av två personer (möjlig dubbelräkning),
    artiklar i sortimentet som inte räknats alls.
-4. Admin kan justera/stryka rader, sedan **Godkänn → Skicka till Visma**. Då skrivs en rad per
+4. **Inlämning (signering):** räknaren lämnar in sina rader och bekräftar med sitt lösenord. Inlämningen får
+   nummer, tid, enhet, IP och en SHA-256-kontrollsumma över raderna. Raderna låses för räknaren.
+   Bara inlämnade rader räknas och skickas till Visma – utkast visas som varning för admin. Admin ser per
+   inlämning om kontrollsumman fortfarande stämmer (upptäcker ändringar direkt i databasen), och kan
+   exportera alla rader med full spårbarhet (vem, enhet, tid, inlämning, struken av/när).
+5. Admin kan justera/stryka rader, sedan **Godkänn → Skicka till Visma**. Då skrivs en rad per
    artikel via ADK. Resultatet (ok/fel per artikel) loggas.
 
 Saldoförändringar under inventeringen: vi sparar Visma-saldot när inventeringen startas

@@ -85,6 +85,47 @@ public class ApiFlowTests : IDisposable
         await Json(await bo.PatchAsJsonAsync($"/api/sessions/{sid}/lines/{boLine}", new { quantity = 8m }));
         Assert.Equal(HttpStatusCode.Conflict, (await bo.PatchAsJsonAsync($"/api/sessions/{sid}/lines/{boLine}", new { quantity = 9m })).StatusCode);
 
+        // Utkast räknas inte förrän de lämnats in
+        var before = await Json(await admin.GetAsync($"/api/admin/sessions/{sid}/summary"));
+        Assert.Equal(0, before.GetProperty("articles").GetArrayLength());
+
+        // Inlämning kräver rätt lösenord och exakt de rader användaren ser
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anna.PostAsJsonAsync($"/api/sessions/{sid}/submit", new { password = "fel", lineIds = new[] { annaLine } })).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await anna.PostAsJsonAsync($"/api/sessions/{sid}/submit", new { password = pw["anna"], lineIds = new[] { Guid.NewGuid() } })).StatusCode);
+        var receipt = await Json(await anna.PostAsJsonAsync($"/api/sessions/{sid}/submit", new { password = pw["anna"], lineIds = new[] { annaLine } }));
+        Assert.Equal(1, receipt.GetProperty("lineCount").GetInt32());
+        // Bos rad fick nytt id när den ändrades – klienten skickar de id:n den ser i sin lista
+        var boIds = (await Json(await bo.GetAsync($"/api/sessions/{sid}/mylines"))).EnumerateArray().Select(x => x.GetProperty("id").GetGuid()).ToArray();
+        await Json(await bo.PostAsJsonAsync($"/api/sessions/{sid}/submit", new { password = pw["bo"], lineIds = boIds }));
+
+        // Inlämnad rad är låst för räknaren
+        Assert.Equal(HttpStatusCode.Conflict, (await anna.PatchAsJsonAsync($"/api/sessions/{sid}/lines/{annaLine}", new { quantity = 1m })).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await anna.DeleteAsync($"/api/sessions/{sid}/lines/{annaLine}")).StatusCode);
+
+        var subs = await Json(await admin.GetAsync($"/api/admin/sessions/{sid}/submissions"));
+        Assert.Equal(2, subs.GetArrayLength());
+        Assert.All(subs.EnumerateArray(), x => Assert.True(x.GetProperty("intact").GetBoolean()));
+
+        // Manipulation direkt i databasen upptäcks
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<Inventering.Web.Data.AppDb>();
+            var l = db.Lines.Single(x => x.Id == annaLine);
+            l.Quantity = 13; db.SaveChanges();
+            l.Quantity = 12; db.SaveChanges();
+        }
+        // (återställt → fortfarande intakt)
+        subs = await Json(await admin.GetAsync($"/api/admin/sessions/{sid}/submissions"));
+        Assert.All(subs.EnumerateArray(), x => Assert.True(x.GetProperty("intact").GetBoolean()));
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<Inventering.Web.Data.AppDb>();
+            db.Lines.Single(x => x.Id == annaLine).Quantity = 99; db.SaveChanges();
+            subs = await Json(await admin.GetAsync($"/api/admin/sessions/{sid}/submissions"));
+            Assert.Contains(subs.EnumerateArray(), x => !x.GetProperty("intact").GetBoolean());
+            db.Lines.Single(x => x.Id == annaLine).Quantity = 12; db.SaveChanges();
+        }
+
         // Kan inte skicka öppen inventering
         Assert.Equal(HttpStatusCode.Conflict, (await admin.PostAsJsonAsync($"/api/admin/sessions/{sid}/send", new { confirm = true })).StatusCode);
 

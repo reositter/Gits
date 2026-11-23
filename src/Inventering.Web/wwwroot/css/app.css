@@ -75,3 +75,7 @@ code { font-family: ui-monospace, Consolas, monospace; word-break: break-all; }
 .badge { font-size: 13px; padding: 4px 10px; border-radius: 99px; background: var(--warn-bg); color: var(--warn); }
 .qtybtn { min-width: 72px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .list li[data-edit] { cursor: pointer; }
+details summary { cursor: pointer; list-style: none; }
+details summary::-webkit-details-marker { display: none; }
+details summary::before { content: '▸ '; color: var(--muted); }
+details[open] summary::before { content: '▾ '; }

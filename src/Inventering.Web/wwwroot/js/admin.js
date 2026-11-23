@@ -70,7 +70,8 @@ async function sessionsView() {
 
 let filter = 'all';
 async function sessionView(id) {
-  const d = await api('GET', `/api/admin/sessions/${id}/summary`);
+  const [d, subs] = await Promise.all([api('GET', `/api/admin/sessions/${id}/summary`), api('GET', `/api/admin/sessions/${id}/submissions`)]);
+  const draftTotal = d.drafts.reduce((n, x) => n + x.lines, 0);
   const s = d.session;
   const arts = d.articles;
   const warnCount = arts.filter((a) => a.warnings.length).length;
@@ -88,11 +89,24 @@ async function sessionView(id) {
         ${s.status === 'Open' ? `<button data-act="lock" class="primary">Lås räkningen</button>` : ''}
         ${s.status === 'Locked' ? `<button data-act="reopen">Öppna för räkning igen</button><button id="sendBtn" class="primary">Godkänn och skicka till Visma…</button>` : ''}
         ${s.status === 'Open' || s.status === 'Locked' ? `<button data-act="cancel" class="danger">Avbryt inventering</button>` : ''}
-        <button onclick="location.href='/api/admin/sessions/${s.id}/export.csv'">Exportera CSV</button>
+        <button onclick="location.href='/api/admin/sessions/${s.id}/export.csv'">Exportera per artikel</button>
+        <button onclick="location.href='/api/admin/sessions/${s.id}/lines.csv'">Exportera alla rader</button>
         <button id="reloadBtn">Uppdatera</button>
       </div>
       <div id="smsg"></div>
-      ${s.status === 'Open' ? `<div class="msg warn">Räkning pågår. Lås inventeringen när alla är klara för att granska och skicka.</div>` : ''}
+      ${s.status === 'Open' ? `<div class="msg warn">Räkning pågår. Lås inventeringen när alla har lämnat in för att granska och skicka.</div>` : ''}
+      ${draftTotal ? `<div class="msg bad">Ej inlämnade rader räknas inte: ${d.drafts.map((x) => `${esc(x.user)} (${x.lines})`).join(', ')}</div>` : ''}
+    </div>
+    <div class="card">
+      <h2>Inlämningar (${subs.length})</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>#</th><th>Användare</th><th>Inlämnad</th><th class="n">Rader</th><th class="n">Totalt</th><th>Signerad</th><th>Kontrollsumma</th><th>Kommentar</th></tr></thead>
+        <tbody>${subs.map((x) => `<tr class="clickable" data-sub="${x.id}"><td>${x.id}</td><td>${esc(x.user)}</td><td>${fmtTime(x.submittedAt)}</td>
+          <td class="n">${x.lineCount}${x.voidedLines ? ` <span class="muted">(${x.voidedLines} strukna)</span>` : ''}</td><td class="n">${fmt(x.totalQuantity)}</td>
+          <td>${x.signedWith === 'password' ? 'Lösenord' : 'Admin-korrigering'}</td>
+          <td>${x.intact ? `<span class="pos">✔ Intakt</span>` : `<span class="neg">⚠ Ändrad efter signering</span>`} <span class="muted">${esc(x.hash.slice(0, 12))}</span></td>
+          <td>${esc(x.comment)}</td></tr>`).join('') || '<tr><td colspan="8" class="muted">Inga inlämningar ännu.</td></tr>'}</tbody>
+      </table></div>
     </div>
     ${s.status === 'Sent' ? `<div class="card" id="results"><h2>Resultat från Visma</h2><p class="muted">Laddar…</p></div>` : ''}
     <div class="card">
@@ -116,10 +130,12 @@ async function sessionView(id) {
       <tbody>${d.uncounted.map((a) => `<tr><td>${esc(a.articleNo)}</td><td>${esc(a.name)}</td><td class="n">${fmt(a.stockQuantity)}</td></tr>`).join('')}</tbody></table></div></div>` : ''}`;
 
   main.querySelectorAll('button[data-f]').forEach((b) => b.onclick = () => { filter = b.dataset.f; sessionView(id); });
-  main.querySelectorAll('tr[data-art]').forEach((tr) => tr.onclick = () => linesDialog(s, tr.dataset.art));
+  main.querySelectorAll('tr[data-art]').forEach((tr) => tr.onclick = () => linesDialog(s, { articleNo: tr.dataset.art }));
+  main.querySelectorAll('tr[data-sub]').forEach((tr) => tr.onclick = () => linesDialog(s, { submissionId: tr.dataset.sub }));
   main.querySelectorAll('button[data-act]').forEach((b) => b.onclick = async () => {
     const act = b.dataset.act;
     if (act === 'cancel' && !confirm('Avbryta inventeringen? Inget skickas till Visma.')) return;
+    if (act === 'lock' && draftTotal && !confirm(`${draftTotal} rader är inte inlämnade och kommer inte att räknas. Låsa ändå?`)) return;
     try { await api('POST', `/api/admin/sessions/${id}/${act}`); sessionView(id); } catch (e) { showMsg($('#smsg'), e.message); }
   });
   $('#reloadBtn').onclick = () => sessionView(id);
@@ -163,18 +179,21 @@ function sendDialog(s, arts, uncounted) {
   };
 }
 
-async function linesDialog(s, articleNo) {
-  const lines = await api('GET', `/api/admin/sessions/${s.id}/lines?articleNo=${encodeURIComponent(articleNo)}`);
+async function linesDialog(s, filter) {
+  const { articleNo, submissionId } = filter;
+  const qs = articleNo ? `articleNo=${encodeURIComponent(articleNo)}` : `submissionId=${submissionId}`;
+  const lines = await api('GET', `/api/admin/sessions/${s.id}/lines?${qs}`);
   const editable = s.status === 'Open' || s.status === 'Locked';
   dlg.innerHTML = `
-    <h2>${esc(articleNo)} ${esc(lines[0]?.name ?? '')}</h2>
+    <h2>${articleNo ? `${esc(articleNo)} ${esc(lines[0]?.name ?? '')}` : `Inlämning #${esc(submissionId)}`}</h2>
     <div class="table-wrap"><table>
-      <thead><tr><th>Tid</th><th>Vem</th><th>Plats</th><th class="n">Antal</th><th></th></tr></thead>
+      <thead><tr><th>Tid</th><th>Vem</th>${articleNo ? '<th>Inl.</th>' : '<th>Artikel</th>'}<th>Plats</th><th class="n">Antal</th><th></th></tr></thead>
       <tbody>${lines.map((l) => `<tr class="${l.isVoided ? 'voided' : ''}"><td>${fmtTime(l.countedAt)}</td><td>${esc(l.user)}</td>
+        <td>${articleNo ? (l.submissionId ? '#' + l.submissionId : '<span class="neg">Utkast</span>') : `${esc(l.articleNo)} ${esc(l.name)}`}</td>
         <td>${esc(l.location)}${l.comment ? `<div class="muted">${esc(l.comment)}</div>` : ''}</td><td class="n">${fmt(l.quantity)}</td>
         <td>${editable ? `<button class="small ${l.isVoided ? '' : 'danger'}" data-id="${l.id}" data-a="${l.isVoided ? 'unvoid' : 'void'}">${l.isVoided ? 'Återställ' : 'Stryk'}</button>` : ''}</td></tr>`).join('')}</tbody>
     </table></div>
-    ${s.status === 'Locked' ? `<form id="corr" class="row" style="margin-top:12px">
+    ${s.status === 'Locked' && articleNo ? `<form id="corr" class="row" style="margin-top:12px">
       <input id="corrQty" type="number" step="any" placeholder="Korrigering (+/−)" required>
       <button class="shrink">Lägg till</button></form>` : ''}
     <div id="lmsg"></div>
@@ -182,14 +201,14 @@ async function linesDialog(s, articleNo) {
   dlg.showModal();
   $('#closeDlg', dlg).onclick = () => { dlg.close(); sessionView(s.id); };
   dlg.querySelectorAll('button[data-id]').forEach((b) => b.onclick = async () => {
-    try { await api('POST', `/api/admin/lines/${b.dataset.id}/${b.dataset.a}`); linesDialog(s, articleNo); }
+    try { await api('POST', `/api/admin/lines/${b.dataset.id}/${b.dataset.a}`); linesDialog(s, filter); }
     catch (e) { showMsg($('#lmsg', dlg), e.message); }
   });
   $('#corr', dlg)?.addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
       await api('POST', `/api/sessions/${s.id}/lines`, [{ id: crypto.randomUUID(), articleNo, quantity: Number($('#corrQty', dlg).value), comment: 'Korrigering av admin', countedAt: new Date().toISOString() }]);
-      linesDialog(s, articleNo);
+      linesDialog(s, filter);
     } catch (err) { showMsg($('#lmsg', dlg), err.message); }
   });
 }

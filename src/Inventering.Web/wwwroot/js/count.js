@@ -139,6 +139,7 @@ function renderCount() {
       </div>
     </form>
     <div id="flash"></div>
+    <dialog id="submitDlg"></dialog>
     <div class="card">
       <div class="row"><h2 style="margin:0">Mina rader</h2><button class="small shrink" id="switch">Byt inventering</button></div>
       <ul class="list" id="mylines"><li class="muted">Laddar…</li></ul>
@@ -265,14 +266,37 @@ async function loadMyLines() {
   const el = $('#mylines');
   if (!el) return;
   const pending = queue.all().filter((l) => l.sessionId === session.id);
-  let lines = [];
-  try { lines = await api('GET', `/api/sessions/${session.id}/mylines`); } catch { /* offline */ }
-  const total = lines.length + pending.length;
-  el.innerHTML = total === 0 ? '<li class="muted">Inga rader ännu.</li>' :
-    pending.map((l) => `<li data-edit="${l.id}" data-pending="1"><div class="grow"><b>${esc(l.articleNo)}</b> ${esc(l.name)}<div class="muted">Väntar på att skickas${l.location ? ' · ' + esc(l.location) : ''}</div></div><button class="small shrink qtybtn">${fmt(l.quantity)} ✎</button></li>`).join('') +
-    lines.map((l) => `<li data-edit="${l.id}"><div class="grow"><b>${esc(l.articleNo)}</b> ${esc(l.name)}<div class="muted">${fmtTime(l.countedAt)}${l.location ? ' · ' + esc(l.location) : ''}${l.comment ? ' · ' + esc(l.comment) : ''}</div></div>
-      <button class="small shrink qtybtn">${fmt(l.quantity)} ✎</button><button class="small danger shrink" data-id="${l.id}" aria-label="Ta bort">✕</button></li>`).join('');
-  const all = [...pending, ...lines];
+  let lines = [], subs = [];
+  try {
+    [lines, subs] = await Promise.all([
+      api('GET', `/api/sessions/${session.id}/mylines`),
+      api('GET', `/api/sessions/${session.id}/mysubmissions`),
+    ]);
+  } catch { /* offline */ }
+  const drafts = lines.filter((l) => !l.submissionId);
+  const draftCount = drafts.length + pending.length;
+  const lineRow = (l, opts) => `<li ${opts.edit ? `data-edit="${l.id}"` : ''}><div class="grow"><b>${esc(l.articleNo)}</b> ${esc(l.name)}
+      <div class="muted">${opts.pending ? 'Väntar på uppkoppling' : fmtTime(l.countedAt)}${l.location ? ' · ' + esc(l.location) : ''}${l.comment ? ' · ' + esc(l.comment) : ''}</div></div>
+      ${opts.edit ? `<button class="small shrink qtybtn">${fmt(l.quantity)} ✎</button>` : `<span class="num">${fmt(l.quantity)}</span>`}
+      ${opts.del ? `<button class="small danger shrink" data-id="${l.id}" aria-label="Ta bort">✕</button>` : ''}</li>`;
+
+  el.innerHTML = `
+    <li class="muted" style="display:block">Ej inlämnade rader (${draftCount}) – kan ändras tills du lämnar in.</li>
+    ${pending.map((l) => lineRow(l, { pending: true, edit: true })).join('')}
+    ${drafts.map((l) => lineRow(l, { edit: true, del: true })).join('')}
+    ${draftCount ? `<li style="display:block"><button class="primary big" id="submitBtn" ${pending.length ? 'disabled' : ''}>
+        ${pending.length ? 'Väntar på uppkoppling…' : `✍ Signera och lämna in ${drafts.length} ${drafts.length === 1 ? 'rad' : 'rader'}`}</button></li>` : ''}
+    ${subs.map((sub) => `
+      <li style="display:block">
+        <details>
+          <summary><b>Inlämning #${sub.id}</b> · ${fmtTime(sub.submittedAt)} · ${sub.lineCount} rader · totalt ${fmt(sub.totalQuantity)}
+            <div class="muted">Kvitto ${esc(sub.hash.slice(0, 12))} · låst</div></summary>
+          <ul class="list">${lines.filter((l) => l.submissionId === sub.id).map((l) => lineRow(l, {})).join('')}</ul>
+        </details>
+      </li>`).join('')}
+    ${draftCount === 0 && subs.length === 0 ? '<li class="muted">Inga rader ännu.</li>' : ''}`;
+
+  const all = [...pending, ...drafts];
   el.querySelectorAll('li[data-edit]').forEach((li) => li.onclick = (e) => {
     if (e.target.closest('button[data-id]')) return;
     const l = all.find((x) => x.id === li.dataset.edit);
@@ -283,6 +307,56 @@ async function loadMyLines() {
     try { await api('DELETE', `/api/sessions/${session.id}/lines/${b.dataset.id}`); loadMyLines(); }
     catch (e) { alert(e.message); }
   });
+  $('#submitBtn')?.addEventListener('click', () => submitDialog(drafts));
+}
+
+/** Signera inlämning: visar exakt vilka rader som lämnas in och kräver lösenord. */
+function submitDialog(drafts) {
+  stopScanner();
+  const total = drafts.reduce((n, l) => n + Number(l.quantity), 0);
+  const dlg = $('#submitDlg');
+  dlg.innerHTML = `
+    <form id="subForm">
+      <h2>Lämna in räkning</h2>
+      <p>Du lämnar in <b>${drafts.length} rader</b> (totalt ${fmt(total)}) i <b>${esc(session.name)}</b>.
+      Efter inlämning är raderna låsta och kan bara ändras av admin.</p>
+      <div class="table-wrap" style="max-height:40vh;overflow:auto"><table>
+        <thead><tr><th>Artikel</th><th>Plats</th><th class="n">Antal</th></tr></thead>
+        <tbody>${drafts.map((l) => `<tr><td><b>${esc(l.articleNo)}</b> ${esc(l.name)}</td><td>${esc(l.location)}</td><td class="n">${fmt(l.quantity)}</td></tr>`).join('')}</tbody>
+      </table></div>
+      <label for="subComment">Kommentar (valfritt)</label>
+      <input id="subComment" maxlength="500">
+      <label for="subPw">Ditt lösenord – signerar att räkningen är korrekt</label>
+      <input id="subPw" type="password" autocomplete="current-password" required>
+      <div id="subMsg"></div>
+      <div class="row" style="margin-top:12px">
+        <button type="button" id="subCancel">Avbryt</button>
+        <button class="primary" id="subOk">Signera och lämna in</button>
+      </div>
+    </form>`;
+  dlg.showModal();
+  $('#subPw', dlg).focus();
+  $('#subCancel', dlg).onclick = () => dlg.close();
+  $('#subForm', dlg).onsubmit = async (e) => {
+    e.preventDefault();
+    $('#subOk', dlg).disabled = true;
+    try {
+      const r = await api('POST', `/api/sessions/${session.id}/submit`, {
+        password: $('#subPw', dlg).value, lineIds: drafts.map((l) => l.id), deviceId, comment: $('#subComment', dlg).value || null,
+      });
+      dlg.innerHTML = `<h2>Inlämnat ✔</h2>
+        <p><b>Inlämning #${r.id}</b><br>${fmtTime(r.submittedAt)} · ${r.lineCount} rader · totalt ${fmt(r.totalQuantity)}</p>
+        <p class="muted">Kvitto: <code>${esc(r.hash.slice(0, 12))}</code></p>
+        <button class="primary big" id="subDone">OK</button>`;
+      $('#subDone', dlg).onclick = () => dlg.close();
+      buzz([60, 60, 60]);
+      loadMyLines();
+    } catch (err) {
+      showMsg($('#subMsg', dlg), err.status === 409 ? err.message + ' ' : err.message);
+      $('#subOk', dlg).disabled = false;
+      if (err.status === 409) { dlg.close(); loadMyLines(); alert(err.message); }
+    }
+  };
 }
 
 // ---------- Kamera ----------

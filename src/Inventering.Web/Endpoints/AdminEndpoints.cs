@@ -83,8 +83,12 @@ public static class AdminEndpoints
             var s = await db.Sessions.FindAsync(id);
             if (s is null) return Results.NotFound();
             var (summary, uncounted) = await inv.SummarizeAsync(id);
+            var users = await db.Users.AsNoTracking().ToDictionaryAsync(u => u.Id, u => u.UserName);
+            var drafts = await db.Lines.AsNoTracking().Where(l => l.SessionId == id && !l.IsVoided && l.SubmissionId == null)
+                .GroupBy(l => l.UserId).Select(x => new { x.Key, Lines = x.Count() }).ToListAsync();
             return Results.Ok(new
             {
+                drafts = drafts.Select(d => new { user = users.GetValueOrDefault(d.Key), d.Lines }),
                 session = new { s.Id, s.Name, status = s.Status.ToString(), s.CreatedAt, s.LockedAt, s.SentAt },
                 articles = summary.Select(a => new
                 {
@@ -95,16 +99,33 @@ public static class AdminEndpoints
             });
         });
 
-        g.MapGet("/sessions/{id:int}/lines", async (int id, string? articleNo, AppDb db, ArticleCache cache) =>
+        g.MapGet("/sessions/{id:int}/submissions", async (int id, AppDb db) =>
+        {
+            var subs = await db.Submissions.AsNoTracking().Where(s => s.SessionId == id).OrderBy(s => s.Id).ToListAsync();
+            var lines = await db.Lines.AsNoTracking().Where(l => l.SessionId == id && l.SubmissionId != null).ToListAsync();
+            var byUser = await db.Users.AsNoTracking().ToDictionaryAsync(u => u.Id, u => u.UserName);
+            var bySub = lines.ToLookup(l => l.SubmissionId!.Value);
+            return subs.Select(s => new
+            {
+                s.Id, s.SubmittedAt, user = byUser.GetValueOrDefault(s.UserId), s.LineCount, s.TotalQuantity, s.SignedWith,
+                s.DeviceId, s.RemoteIp, s.Comment, s.Hash,
+                // Kontrollsumman räknas om: falsk = raderna har ändrats i databasen efter signering.
+                intact = SubmissionHasher.Compute(s, bySub[s.Id]) == s.Hash && bySub[s.Id].Count() == s.LineCount,
+                voidedLines = bySub[s.Id].Count(l => l.IsVoided),
+            });
+        });
+
+        g.MapGet("/sessions/{id:int}/lines", async (int id, string? articleNo, int? submissionId, AppDb db, ArticleCache cache) =>
         {
             var q = db.Lines.AsNoTracking().Where(l => l.SessionId == id);
             if (!string.IsNullOrEmpty(articleNo)) q = q.Where(l => l.ArticleNo == articleNo);
+            if (submissionId is { } sid) q = q.Where(l => l.SubmissionId == sid);
             var lines = await q.ToListAsync();
             var users = await db.Users.AsNoTracking().ToDictionaryAsync(u => u.Id, u => u.UserName);
             return lines.OrderBy(l => l.CountedAt).Select(l => new
             {
                 l.Id, l.ArticleNo, name = cache.Get(l.ArticleNo)?.Name, l.Quantity, l.Location, l.Comment,
-                l.CountedAt, l.ScannedCode, l.DeviceId, user = users.GetValueOrDefault(l.UserId), l.IsVoided,
+                l.CountedAt, l.ScannedCode, l.DeviceId, user = users.GetValueOrDefault(l.UserId), l.IsVoided, l.SubmissionId,
             });
         });
 
@@ -151,6 +172,26 @@ public static class AdminEndpoints
                     a.Difference.ToString(c), a.LineCount, Csv(string.Join(", ", a.CountedBy)), Csv(string.Join(" | ", a.Warnings)))).Append("\r\n");
             // BOM så att Excel läser åäö rätt.
             return Results.File(Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(sb.ToString())).ToArray(), "text/csv", $"inventering-{id}.csv");
+        });
+
+        // Alla rader med full spårbarhet (vem, enhet, tid, inlämning, struken av).
+        g.MapGet("/sessions/{id:int}/lines.csv", async (int id, AppDb db, ArticleCache cache) =>
+        {
+            var lines = await db.Lines.AsNoTracking().Where(l => l.SessionId == id).OrderBy(l => l.CountedAt).ToListAsync();
+            var users = await db.Users.AsNoTracking().ToDictionaryAsync(u => u.Id, u => u.UserName);
+            var subs = await db.Submissions.AsNoTracking().Where(s => s.SessionId == id).ToDictionaryAsync(s => s.Id);
+            var c = CultureInfo.GetCultureInfo("sv-SE");
+            var sb = new StringBuilder("Rad-id;Artikelnr;Benämning;Antal;Plats;Kommentar;Skannad kod;Räknad;Användare;Enhet;Inlämning;Inlämnad;Signerad med;Struken;Struken av;Struken tid\r\n");
+            foreach (var l in lines)
+            {
+                subs.TryGetValue(l.SubmissionId ?? 0, out var sub);
+                sb.Append(string.Join(';', l.Id, Csv(l.ArticleNo), Csv(cache.Get(l.ArticleNo)?.Name), l.Quantity.ToString(c), Csv(l.Location), Csv(l.Comment),
+                    Csv(l.ScannedCode), l.CountedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"), Csv(users.GetValueOrDefault(l.UserId)), Csv(l.DeviceId),
+                    sub?.Id.ToString() ?? "UTKAST", sub?.SubmittedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"), sub?.SignedWith,
+                    l.IsVoided ? "Ja" : "", l.VoidedByUserId is { } v ? Csv(users.GetValueOrDefault(v)) : "",
+                    l.VoidedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"))).Append("\r\n");
+            }
+            return Results.File(Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(sb.ToString())).ToArray(), "text/csv", $"inventering-{id}-rader.csv");
         });
 
         // ---- Användare ----

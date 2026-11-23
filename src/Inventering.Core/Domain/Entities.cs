@@ -82,9 +82,31 @@ public class CountLine
     /// <summary>Valfri plats/hylla – hjälper att upptäcka dubbelräkning.</summary>
     public string? Location { get; set; }
     public string? Comment { get; set; }
+    /// <summary>Null = utkast (ej inlämnat). Bara inlämnade rader räknas och skickas till Visma.</summary>
+    public int? SubmissionId { get; set; }
     public bool IsVoided { get; set; }
     public int? VoidedByUserId { get; set; }
     public DateTimeOffset? VoidedAt { get; set; }
+}
+
+/// <summary>
+/// En inlämning: användaren signerar (med lösenord) att raderna är hens räkning.
+/// Raderna låses och en kontrollsumma (SHA-256) sparas så att ändringar i efterhand kan upptäckas.
+/// </summary>
+public class Submission
+{
+    public int Id { get; set; }
+    public int SessionId { get; set; }
+    public int UserId { get; set; }
+    public string? DeviceId { get; set; }
+    public DateTimeOffset SubmittedAt { get; set; } = DateTimeOffset.UtcNow;
+    public int LineCount { get; set; }
+    public decimal TotalQuantity { get; set; }
+    /// <summary>Hur användaren bekräftade: "password" eller "admin-correction".</summary>
+    public string SignedWith { get; set; } = "password";
+    public string Hash { get; set; } = "";
+    public string? RemoteIp { get; set; }
+    public string? Comment { get; set; }
 }
 
 /// <summary>Utfall per artikel när inventeringen skickades till Visma.</summary>

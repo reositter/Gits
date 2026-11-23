@@ -23,7 +23,8 @@ public class InventoryService(AppDb db, ArticleCache cache, IVismaGateway visma,
 
     public async Task<(IReadOnlyList<ArticleSummary> Summary, IReadOnlyList<Article> Uncounted)> SummarizeAsync(int sessionId)
     {
-        var lines = await db.Lines.AsNoTracking().Where(l => l.SessionId == sessionId).ToListAsync();
+        // Bara inlämnade (signerade) rader räknas. Utkast syns för admin som varning.
+        var lines = await db.Lines.AsNoTracking().Where(l => l.SessionId == sessionId && l.SubmissionId != null).ToListAsync();
         var snapshot = await db.Snapshots.AsNoTracking().Where(s => s.SessionId == sessionId)
             .ToDictionaryAsync(s => s.ArticleNo, s => s.Quantity, StringComparer.OrdinalIgnoreCase);
         var users = await db.Users.AsNoTracking().ToDictionaryAsync(u => u.Id, u => string.IsNullOrEmpty(u.DisplayName) ? u.UserName : u.DisplayName);
