@@ -78,6 +78,8 @@ public class CountLine
     public string ArticleNo { get; set; } = "";
     /// <summary>Den kod som skannades/skrevs in (EAN eller artikelnr).</summary>
     public string? ScannedCode { get; set; }
+    /// <summary>Hur koden tolkades (EAN, Artikelnr, Regel: …, Extra streckkod, Sökning).</summary>
+    public string? ScanVia { get; set; }
     public decimal Quantity { get; set; }
     /// <summary>Valfri plats/hylla – hjälper att upptäcka dubbelräkning.</summary>
     public string? Location { get; set; }

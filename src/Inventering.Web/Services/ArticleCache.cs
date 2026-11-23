@@ -21,6 +21,8 @@ public class ArticleCache(IServiceScopeFactory scopes, IVismaGateway visma, ILog
 
     public Article? Get(string articleNo) => _snap.ByArticleNo.GetValueOrDefault(articleNo);
 
+    public Article? FindByEan(string ean) => _snap.ByEan.GetValueOrDefault(ean);
+
     public IReadOnlyDictionary<string, Article> ByArticleNo => _snap.ByArticleNo;
 
     public IReadOnlyList<Article> All => _snap.All;

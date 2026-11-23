@@ -21,7 +21,7 @@ function go(tab) { location.hash = tab; }
 function route() {
   const [tab, id] = (location.hash.slice(1) || 'sessions').split('/');
   $('#tabs').querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
-  const r = { sessions: () => id ? sessionView(Number(id)) : sessionsView(), users: usersView, audit: auditView }[tab] ?? sessionsView;
+  const r = { sessions: () => id ? sessionView(Number(id)) : sessionsView(), barcodes: barcodesView, users: usersView, audit: auditView }[tab] ?? sessionsView;
   r().catch((e) => showMsg(main, e.message));
 }
 
@@ -233,6 +233,147 @@ async function linesDialog(s, filter) {
       linesDialog(s, filter);
     } catch (err) { showMsg($('#lmsg', dlg), err.message); }
   });
+}
+
+// ---------- Streckkoder ----------
+const TEMPLATES = [
+  { name: 'GS1-128 / DataMatrix', type: 'Gs1', pattern: '', quantityDecimals: 0, quantityMultiplier: 1,
+    description: '(01) GTIN → artikel via EAN, (30)/(37) antal, (310x) vikt i kg.' },
+  { name: 'Artikelnr*antal', type: 'Regex', pattern: '^(?<art>[^*]+)\\*(?<qty>\\d+(?:[.,]\\d+)?)$', quantityDecimals: 0, quantityMultiplier: 1,
+    description: 'Egen etikett, t.ex. 1001*12.' },
+  { name: 'Viktvara EAN-13 (23 + 5 art + 5 vikt g)', type: 'Regex', pattern: '^23(?<art>\\d{5})(?<qty>\\d{5})\\d$', quantityDecimals: 3, quantityMultiplier: 1,
+    description: 'Butiksintern EAN, t.ex. 2310030012508 = artikel 10030, 1,250 kg. Anpassa prefix och längder.' },
+  { name: 'Prefix + artikelnr (t.ex. A1001)', type: 'Regex', pattern: '^A(?<art>.+)$', quantityDecimals: 0, quantityMultiplier: 1,
+    description: 'Hyllkant/egen etikett med bokstavsprefix.' },
+];
+
+async function barcodesView() {
+  const [rules, aliases] = await Promise.all([api('GET', '/api/admin/barcodes/rules'), api('GET', '/api/admin/barcodes/aliases')]);
+  main.innerHTML = `
+    <div class="card">
+      <h2>Testa streckkod</h2>
+      <form id="tf" class="row"><input id="tcode" placeholder="Skanna eller skriv en kod" autocomplete="off"><button class="shrink">Testa</button></form>
+      <div id="tres"></div>
+      <p class="muted">Ordning vid skanning: 1) extra streckkod nedan, 2) EAN eller artikelnr i Visma, 3) regler uppifrån och ned.
+      Skriv GS1-koder med parenteser, t.ex. <code>(01)07310000000011(30)12</code>.</p>
+    </div>
+    <div class="card">
+      <h2>Regler</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th></th><th>Namn</th><th>Typ</th><th>Mönster</th><th class="n">Dec.</th><th class="n">× antal</th><th>Aktiv</th><th></th></tr></thead>
+        <tbody>${rules.map((r, i) => `<tr><td class="row" style="gap:2px">
+            <button class="small shrink" data-mv="${r.id}" data-dir="up" ${i === 0 ? 'disabled' : ''}>↑</button>
+            <button class="small shrink" data-mv="${r.id}" data-dir="down" ${i === rules.length - 1 ? 'disabled' : ''}>↓</button></td>
+          <td><b>${esc(r.name)}</b>${r.description ? `<div class="muted">${esc(r.description)}</div>` : ''}</td>
+          <td>${r.type === 1 || r.type === 'Gs1' ? 'GS1' : 'Regex'}</td><td><code>${esc(r.pattern)}</code></td>
+          <td class="n">${r.quantityDecimals}</td><td class="n">${fmt(r.quantityMultiplier)}</td><td>${r.isActive ? 'Ja' : 'Nej'}</td>
+          <td class="row" style="justify-content:flex-end"><button class="small shrink" data-edit="${r.id}">Ändra</button><button class="small shrink danger" data-del="${r.id}">Ta bort</button></td></tr>`).join('')
+          || '<tr><td colspan="8" class="muted">Inga regler – bara EAN och artikelnr från Visma används.</td></tr>'}</tbody>
+      </table></div>
+      <div class="toolbar" style="margin-top:12px">
+        <button id="newRule" class="primary">Ny regel</button>
+        <select id="tpl" style="width:auto"><option value="">Lägg till från mall…</option>${TEMPLATES.map((t, i) => `<option value="${i}">${esc(t.name)}</option>`).join('')}</select>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Extra streckkoder</h2>
+      <p class="muted">Visma har en streckkod per artikel. Här kan fler läggas till, t.ex. kartong-EAN som motsvarar 12 st.</p>
+      <form id="af" class="row" style="flex-wrap:wrap" autocomplete="off">
+        <input id="acode" placeholder="Streckkod" required>
+        <input id="aart" placeholder="Artikelnr" required>
+        <input id="aqty" type="number" step="any" min="0" value="1" placeholder="Antal per skanning" style="max-width:140px">
+        <input id="anote" placeholder="Notering (t.ex. Kartong)">
+        <button class="primary shrink">Spara</button>
+      </form><div id="amsg"></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Streckkod</th><th>Artikel</th><th class="n">Antal/skanning</th><th>Notering</th><th></th></tr></thead>
+        <tbody>${aliases.map((a) => `<tr><td><code>${esc(a.code)}</code></td><td>${esc(a.articleNo)} ${esc(a.name)}</td><td class="n">${fmt(a.quantity)}</td>
+          <td>${esc(a.note)}</td><td><button class="small danger" data-adel="${esc(a.code)}">Ta bort</button></td></tr>`).join('')
+          || '<tr><td colspan="5" class="muted">Inga extra streckkoder.</td></tr>'}</tbody>
+      </table></div>
+    </div>`;
+
+  $('#tf').onsubmit = async (e) => {
+    e.preventDefault();
+    try { $('#tres').innerHTML = testResult(await api('POST', '/api/admin/barcodes/test', { code: $('#tcode').value })); }
+    catch (err) { showMsg($('#tres'), err.message); }
+  };
+  $('#newRule').onclick = () => ruleDialog(null);
+  $('#tpl').onchange = (e) => { if (e.target.value !== '') ruleDialog({ ...TEMPLATES[e.target.value], isActive: true }); e.target.value = ''; };
+  main.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => ruleDialog(rules.find((r) => r.id === Number(b.dataset.edit))));
+  main.querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => {
+    if (!confirm('Ta bort regeln?')) return;
+    await api('DELETE', `/api/admin/barcodes/rules/${b.dataset.del}`); barcodesView();
+  });
+  main.querySelectorAll('[data-mv]').forEach((b) => b.onclick = async () => {
+    await api('POST', `/api/admin/barcodes/rules/${b.dataset.mv}/move/${b.dataset.dir}`); barcodesView();
+  });
+  $('#af').onsubmit = async (e) => {
+    e.preventDefault();
+    try {
+      await api('POST', '/api/admin/barcodes/aliases', { code: $('#acode').value, articleNo: $('#aart').value, quantity: Number($('#aqty').value || 1), note: $('#anote').value });
+      barcodesView();
+    } catch (err) { showMsg($('#amsg'), err.message); }
+  };
+  main.querySelectorAll('[data-adel]').forEach((b) => b.onclick = async () => {
+    if (!confirm('Ta bort streckkoden?')) return;
+    await api('DELETE', `/api/admin/barcodes/aliases/${encodeURIComponent(b.dataset.adel)}`); barcodesView();
+  });
+}
+
+function testResult(r) {
+  const gs1 = r.gs1 ? `<div class="muted">GS1-fält: ${Object.entries(r.gs1).map(([k, v]) => `(${esc(k)}) ${esc(v)}`).join(' · ')}</div>` : '';
+  return r.found
+    ? `<div class="msg ok">Artikel <b>${esc(r.articleNo)}</b> ${esc(r.name)} · antal: ${r.quantity == null ? 'anges av användaren' : fmt(r.quantity)} · via ${esc(r.via)}</div>${gs1}`
+    : `<div class="msg bad">Ingen artikel hittades.</div>${gs1}`;
+}
+
+function ruleDialog(rule) {
+  const r = rule ?? { name: '', type: 'Regex', pattern: '', quantityDecimals: 0, quantityMultiplier: 1, isActive: true, description: '' };
+  const isGs1 = r.type === 1 || r.type === 'Gs1';
+  dlg.innerHTML = `
+    <form id="rf">
+      <h2>${rule?.id ? 'Ändra regel' : 'Ny regel'}</h2>
+      <label>Namn</label><input id="rn" value="${esc(r.name)}" required>
+      <label>Typ</label>
+      <select id="rt"><option value="Regex" ${isGs1 ? '' : 'selected'}>Reguljärt uttryck</option><option value="Gs1" ${isGs1 ? 'selected' : ''}>GS1-128 / DataMatrix</option></select>
+      <div id="patRow">
+        <label>Mönster</label><input id="rp" value="${esc(r.pattern)}" style="font-family:ui-monospace,Consolas,monospace">
+        <p class="muted">Grupper: <code>(?&lt;art&gt;…)</code> artikelnr eller <code>(?&lt;ean&gt;…)</code> EAN (en krävs), valfritt <code>(?&lt;qty&gt;…)</code> antal.</p>
+      </div>
+      <div class="row">
+        <div><label>Decimaler i antal</label><input id="rd" type="number" min="0" max="6" value="${r.quantityDecimals}"></div>
+        <div><label>Multiplikator</label><input id="rm" type="number" step="any" min="0" value="${r.quantityMultiplier}"></div>
+      </div>
+      <p class="muted">Exempel: vikt i gram med 3 decimaler → kg. Multiplikator 12 = varje skanning är 12 st.</p>
+      <label>Beskrivning</label><input id="rdesc" value="${esc(r.description)}">
+      <label class="row" style="color:var(--text)"><input type="checkbox" id="ra" style="width:auto;flex:0" ${r.isActive ? 'checked' : ''}> Aktiv</label>
+      <label>Testa regeln</label>
+      <div class="row"><input id="rtest" placeholder="Exempelkod"><button type="button" class="shrink" id="rtestBtn">Testa</button></div>
+      <div id="rmsg"></div>
+      <div class="row" style="margin-top:12px"><button type="button" id="rcancel">Avbryt</button><button class="primary">Spara</button></div>
+    </form>`;
+  dlg.showModal();
+  const sync = () => $('#patRow', dlg).classList.toggle('hidden', $('#rt', dlg).value === 'Gs1');
+  $('#rt', dlg).onchange = sync; sync();
+  const body = () => ({
+    name: $('#rn', dlg).value, type: $('#rt', dlg).value, pattern: $('#rp', dlg).value,
+    quantityDecimals: Number($('#rd', dlg).value || 0), quantityMultiplier: Number($('#rm', dlg).value || 1),
+    isActive: $('#ra', dlg).checked, description: $('#rdesc', dlg).value,
+  });
+  $('#rcancel', dlg).onclick = () => dlg.close();
+  $('#rtestBtn', dlg).onclick = async () => {
+    try { $('#rmsg', dlg).innerHTML = testResult(await api('POST', '/api/admin/barcodes/test', { code: $('#rtest', dlg).value, rule: { ...body(), name: body().name || 'test' } })); }
+    catch (e) { showMsg($('#rmsg', dlg), e.message); }
+  };
+  $('#rf', dlg).onsubmit = async (e) => {
+    e.preventDefault();
+    try {
+      if (rule?.id) await api('PUT', `/api/admin/barcodes/rules/${rule.id}`, body());
+      else await api('POST', '/api/admin/barcodes/rules', body());
+      dlg.close(); barcodesView();
+    } catch (err) { showMsg($('#rmsg', dlg), err.message); }
+  };
 }
 
 // ---------- Användare ----------

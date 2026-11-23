@@ -183,7 +183,7 @@ async function lookup(code, source) {
     $('#results').innerHTML = `<ul class="list">${hits.map((a, i) => `
       <li><div class="grow"><b>${esc(a.articleNo)}</b> ${esc(a.name)}<div class="muted">${esc(a.ean ?? 'Ingen EAN')}</div></div>
       <button class="shrink" data-i="${i}">Välj</button></li>`).join('')}</ul>`;
-    $('#results').querySelectorAll('button').forEach((b) => b.onclick = () => found(hits[b.dataset.i], code, 'search'));
+    $('#results').querySelectorAll('button').forEach((b) => b.onclick = () => found({ ...hits[b.dataset.i], via: 'Sökning' }, code, 'search'));
   }
 }
 
@@ -193,8 +193,9 @@ function found(a, code, source) {
   buzz(60);
   if (!a.isStockItem) return showMsg($('#results'), `${a.articleNo} ${a.name} är inte en lagerartikel.`, 'warn');
   if (prefs.quickMode && source === 'scan') {
-    const line = addLine(a, code, 1, '');
-    flash(`+1 ${a.articleNo} ${a.name}`, () => openEntry({ article: a, code, edit: line }));
+    const q = a.quantity ?? 1;
+    const line = addLine(a, code, q, '');
+    flash(`+${fmt(q)} ${a.articleNo} ${a.name}`, () => openEntry({ article: a, code, edit: line }));
     return;
   }
   openEntry({ article: a, code });
@@ -207,8 +208,8 @@ function openEntry(c) {
   const a = c.article;
   $('#artName').textContent = `${a.articleNo} – ${a.name ?? ''}`;
   $('#artMeta').textContent = c.edit ? 'Ändra antal'
-    : [a.ean ? `EAN ${a.ean}` : 'Ingen EAN', a.unit].filter(Boolean).join(' · ');
-  $('#qty').value = c.edit ? c.edit.quantity : 1;
+    : [a.ean ? `EAN ${a.ean}` : 'Ingen EAN', a.unit, a.via && !['EAN', 'Artikelnr'].includes(a.via) ? a.via : null].filter(Boolean).join(' · ');
+  $('#qty').value = c.edit ? c.edit.quantity : (a.quantity ?? 1);
   $('#comment').value = c.edit?.comment ?? '';
   $('#saveEntry').textContent = c.edit ? 'Spara ändring' : 'Spara';
   $('#entry').classList.remove('hidden');
@@ -245,7 +246,7 @@ function closeEntry() {
 
 function addLine(a, code, qty, comment) {
   const line = {
-    id: crypto.randomUUID(), sessionId: session.id, articleNo: a.articleNo, name: a.name, scannedCode: code,
+    id: crypto.randomUUID(), sessionId: session.id, articleNo: a.articleNo, name: a.name, scannedCode: code, scanVia: a.via ?? null,
     quantity: qty, location: prefs.location || null, comment: comment || null,
     countedAt: new Date().toISOString(), deviceId,
   };

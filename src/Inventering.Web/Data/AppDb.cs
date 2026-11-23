@@ -11,6 +11,8 @@ public class AppDb(DbContextOptions<AppDb> options) : DbContext(options)
     public DbSet<StockSnapshot> Snapshots => Set<StockSnapshot>();
     public DbSet<CountLine> Lines => Set<CountLine>();
     public DbSet<Submission> Submissions => Set<Submission>();
+    public DbSet<BarcodeRule> BarcodeRules => Set<BarcodeRule>();
+    public DbSet<BarcodeAlias> BarcodeAliases => Set<BarcodeAlias>();
     public DbSet<SendResult> SendResults => Set<SendResult>();
     public DbSet<AuditEntry> Audit => Set<AuditEntry>();
 
@@ -40,6 +42,7 @@ public class AppDb(DbContextOptions<AppDb> options) : DbContext(options)
             e.HasIndex(x => new { x.SessionId, x.ArticleNo });
         });
         b.Entity<SendResult>(e => e.HasIndex(x => x.SessionId));
+        b.Entity<BarcodeAlias>(e => { e.HasKey(x => x.Code); e.HasIndex(x => x.ArticleNo); });
         b.Entity<Submission>(e => e.HasIndex(x => new { x.SessionId, x.UserId }));
         b.Entity<CountLine>().HasIndex(x => x.SubmissionId);
 

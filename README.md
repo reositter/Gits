@@ -12,6 +12,7 @@ till Visma Administration via ADK. Bakgrund och designbeslut finns i [docs/ARKIT
 | Flera mobiler samtidigt, summering per artikel, varningar | Klar |
 | Admin: starta/låsa/granska/stryka rader/korrigera/skicka, CSV-export | Klar |
 | Inloggning, roller, kontospärr, TOTP-tvåfaktor, händelselogg | Klar |
+| Streckkodsregler per kund (regex, GS1-128/DataMatrix) och extra streckkoder (t.ex. kartong = 12 st) | Klar |
 | Signerad inlämning per användare, kontrollsumma, spårbarhet på radnivå | Klar |
 | Koppling mot Visma via ADK (AvSynkLib), läser artiklar och skriver till inventeringsunderlaget | Byggd, **ej testad mot riktig Visma** |
 
@@ -110,6 +111,23 @@ Utan HTTPS fungerar sökfältet och handskannrar i tangentbordsläge, men inte k
 
 Lägg in en länk eller integrationspost, enligt befintligt upplägg med `dynamic.xml`, som öppnar
 `https://inventering.foretaget.se/admin.html` i webbläsaren.
+
+## Streckkoder
+
+Admin → **Streckkoder**. En skannad kod tolkas i den här ordningen:
+
+1. **Extra streckkod.** En kod kopplas till en artikel och ett antal per skanning, t.ex. kartong-EAN = 12 st.
+   Visma har bara ett streckkodsfält per artikel.
+2. **EAN eller artikelnr** från Visma, med exakt träff.
+3. **Regler** uppifrån och ned:
+   - **Regex** med grupperna `(?<art>…)` eller `(?<ean>…)`, och valfritt `(?<qty>…)`. Det finns även inställningar för
+     decimaler (t.ex. gram → kg) och en multiplikator.
+   - **GS1-128 / DataMatrix:** (01) GTIN → artikel via EAN, (30)/(37) antal, (310x) vikt.
+   - Mallar finns för GS1, `artikelnr*antal`, viktvaror (EAN-13 med prefix 2x) och prefix + artikelnr.
+
+Ger koden ett antal fylls det i automatiskt men kan ändras. I snabbläget används det direkt.
+Det sparas på varje rad hur koden tolkades ("Tolkad via"), och det syns i radexporten.
+Regler kan testas innan de sparas.
 
 ## Säkerhetsinställningar (`Security`)
 

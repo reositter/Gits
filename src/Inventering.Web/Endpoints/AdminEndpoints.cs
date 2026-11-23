@@ -132,7 +132,7 @@ public static class AdminEndpoints
             return lines.OrderBy(l => l.CountedAt).Select(l => new
             {
                 l.Id, l.ArticleNo, name = cache.Get(l.ArticleNo)?.Name, l.Quantity, l.Location, l.Comment,
-                l.CountedAt, l.ScannedCode, l.DeviceId, user = users.GetValueOrDefault(l.UserId), l.IsVoided, l.SubmissionId,
+                l.CountedAt, l.ScannedCode, l.ScanVia, l.DeviceId, user = users.GetValueOrDefault(l.UserId), l.IsVoided, l.SubmissionId,
             });
         });
 
@@ -188,12 +188,12 @@ public static class AdminEndpoints
             var users = await db.Users.AsNoTracking().ToDictionaryAsync(u => u.Id, u => u.UserName);
             var subs = await db.Submissions.AsNoTracking().Where(s => s.SessionId == id).ToDictionaryAsync(s => s.Id);
             var c = CultureInfo.GetCultureInfo("sv-SE");
-            var sb = new StringBuilder("Rad-id;Artikelnr;Benämning;Antal;Plats;Kommentar;Skannad kod;Räknad;Användare;Enhet;Inlämning;Inlämnad;Signerad med;Struken;Struken av;Struken tid\r\n");
+            var sb = new StringBuilder("Rad-id;Artikelnr;Benämning;Antal;Plats;Kommentar;Skannad kod;Tolkad via;Räknad;Användare;Enhet;Inlämning;Inlämnad;Signerad med;Struken;Struken av;Struken tid\r\n");
             foreach (var l in lines)
             {
                 subs.TryGetValue(l.SubmissionId ?? 0, out var sub);
                 sb.Append(string.Join(';', l.Id, Csv(l.ArticleNo), Csv(cache.Get(l.ArticleNo)?.Name), l.Quantity.ToString(c), Csv(l.Location), Csv(l.Comment),
-                    Csv(l.ScannedCode), l.CountedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"), Csv(users.GetValueOrDefault(l.UserId)), Csv(l.DeviceId),
+                    Csv(l.ScannedCode), Csv(l.ScanVia), l.CountedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"), Csv(users.GetValueOrDefault(l.UserId)), Csv(l.DeviceId),
                     sub?.Id.ToString() ?? "UTKAST", sub?.SubmittedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"), sub?.SignedWith,
                     l.IsVoided ? "Ja" : "", l.VoidedByUserId is { } v ? Csv(users.GetValueOrDefault(v)) : "",
                     l.VoidedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"))).Append("\r\n");

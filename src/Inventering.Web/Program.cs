@@ -42,6 +42,7 @@ if (vismaMode.Equals("Adk", StringComparison.OrdinalIgnoreCase))
 else builder.Services.AddSingleton<IVismaGateway, FakeVismaGateway>();
 
 builder.Services.AddSingleton<ArticleCache>();
+builder.Services.AddSingleton<BarcodeService>();
 builder.Services.AddHostedService<ArticleRefreshService>();
 builder.Services.AddScoped<InventoryService>();
 builder.Services.AddSingleton<PasswordService>();
@@ -116,6 +117,7 @@ using (var scope = app.Services.CreateScope())
         app.Logger.LogWarning("Första admin-kontot skapat. Lösenordet finns i {File}", file);
     }
 }
+await app.Services.GetRequiredService<BarcodeService>().ReloadAsync();
 
 // ---- Säkerhetshuvuden ----
 app.Use(async (ctx, next) =>
@@ -155,6 +157,7 @@ app.MapGet("/api/health", () => Results.Ok(new { ok = true }));
 app.MapAuth();
 app.MapCount();
 app.MapAdmin();
+app.MapBarcodeAdmin();
 
 app.Run();
 

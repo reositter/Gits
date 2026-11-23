@@ -6,7 +6,7 @@ using Microsoft.Extensions.Options;
 
 namespace Inventering.Web.Endpoints;
 
-public record LineDto(Guid Id, string ArticleNo, string? ScannedCode, decimal Quantity, string? Location, string? Comment, DateTimeOffset? CountedAt, string? DeviceId);
+public record LineDto(Guid Id, string ArticleNo, string? ScannedCode, decimal Quantity, string? Location, string? Comment, DateTimeOffset? CountedAt, string? DeviceId, string? ScanVia = null);
 
 public record EditLineRequest(decimal Quantity, string? Comment);
 public record SubmitRequest(string Password, List<Guid> LineIds, string? DeviceId, string? Comment);
@@ -25,8 +25,10 @@ public static class CountEndpoints
                 .Select(s => new { s.Id, s.Name, s.CreatedAt })
                 .ToListAsync());
 
-        g.MapGet("/articles/lookup", (string code, ArticleCache cache) =>
-            cache.Find(code) is { } a ? Results.Ok(ArticleDto(a)) : Results.NotFound(new { error = $"Ingen artikel med kod \"{code}\"." }));
+        g.MapGet("/articles/lookup", (string code, BarcodeService barcodes) =>
+            barcodes.Parse(code) is { } r
+                ? Results.Ok(new { r.Article.ArticleNo, r.Article.Name, r.Article.Ean, r.Article.Unit, r.Article.IsStockItem, quantity = r.Quantity, via = r.Via })
+                : Results.NotFound(new { error = $"Ingen artikel med kod \"{code}\"." }));
 
         g.MapGet("/articles/search", (string q, ArticleCache cache) =>
             cache.Search(q).Select(ArticleDto));
@@ -62,7 +64,7 @@ public static class CountEndpoints
                 db.Lines.Add(new CountLine
                 {
                     Id = l.Id, SessionId = id, UserId = userId, DeviceId = Trim(l.DeviceId, 64),
-                    ArticleNo = art!.ArticleNo, ScannedCode = Trim(l.ScannedCode, 64), Quantity = l.Quantity,
+                    ArticleNo = art!.ArticleNo, ScannedCode = Trim(l.ScannedCode, 128), ScanVia = Trim(l.ScanVia, 100), Quantity = l.Quantity,
                     Location = Trim(l.Location, 64), Comment = Trim(l.Comment, 500),
                     CountedAt = DateTimeOffset.FromUnixTimeMilliseconds((l.CountedAt ?? DateTimeOffset.UtcNow).ToUnixTimeMilliseconds()),
                 });
@@ -108,7 +110,7 @@ public static class CountEndpoints
             var copy = new CountLine
             {
                 Id = Guid.NewGuid(), SessionId = id, UserId = line.UserId, DeviceId = line.DeviceId,
-                ArticleNo = line.ArticleNo, ScannedCode = line.ScannedCode, Quantity = req.Quantity,
+                ArticleNo = line.ArticleNo, ScannedCode = line.ScannedCode, ScanVia = line.ScanVia, Quantity = req.Quantity,
                 Location = line.Location, Comment = req.Comment ?? line.Comment, CountedAt = line.CountedAt,
             };
             db.Lines.Add(copy);
