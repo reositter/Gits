@@ -161,3 +161,13 @@ body.m .m-chip[aria-pressed="true"]:hover:not(:disabled) { background: var(--m-p
 body.m .m-btn-danger:hover:not(:disabled), body.m .m-btn-plain:hover:not(:disabled), body.m .m-menu button:hover:not(:disabled),
 body.m .m-search button:hover:not(:disabled), body.m .m-textlink:hover:not(:disabled), body.m .m-toast button:hover:not(:disabled) { background: transparent; }
 body.m .m-iconbtn:hover:not(:disabled), body.m .m-company:hover:not(:disabled), body.m .m-stepper button:hover:not(:disabled) { background: var(--m-fill); }
+
+/* ---------- Certifikatsidan ---------- */
+.m-cert { padding: 0 20px 40px; }
+.m-cert > .m-sub { font-size: 15px; line-height: 1.5; color: var(--m-text-2); }
+.m-steps { margin: 6px 0 0; padding: 0; list-style: none; counter-reset: s; }
+.m-steps li { counter-increment: s; position: relative; padding: 12px 0 12px 40px; border-bottom: 1px solid var(--m-line); font-size: 15px; line-height: 1.45; }
+.m-steps li::before { content: counter(s); position: absolute; left: 0; top: 11px; width: 26px; height: 26px; border-radius: 13px; background: var(--m-fill); color: var(--m-text); display: grid; place-items: center; font-size: 13px; font-weight: 600; }
+.m-cert a.m-btn { text-decoration: none; }
+.m-qr { margin-top: 28px; display: flex; gap: 16px; align-items: center; }
+.m-qr .qr { background: #fff; padding: 8px; border-radius: 10px; border: 1px solid var(--m-line); }

@@ -28,6 +28,7 @@ src/Inventering.Core       Domän, summering, IVismaGateway, Fake- och ADK-gatew
 src/Inventering.Web        ASP.NET Core (.NET 8): API, SQLite, inloggning, wwwroot (mobil + admin)
 src/Inventering.AdkBridge  .NET Framework 4.8 x86-konsol som gör ADK-anropen (AvSynkLib/AdkNet4Wrapper)
 lib/                       AvSynkLib.dll + AdkNet4Wrapper.dll – kopieras hit, checkas inte in
+deploy/                    bygg-paket.ps1 och installera.ps1 (installation med val av certifikat)
 tests/Inventering.Tests Enhetstester och API-flödestester
 ```
 
@@ -69,45 +70,44 @@ admin-sidan syns om underlaget finns.
 
 ## Installera på Visma-servern (Windows)
 
-1. Kopiera `AvSynkLib.dll` och `AdkNet4Wrapper.dll` till `lib/`, t.ex. från `_lib` i ett befintligt ADK-projekt.
-2. Publicera webbtjänsten och bryggan:
-   ```
-   dotnet publish src/Inventering.Web -c Release -r win-x64 --self-contained -o C:\Inventering
-   dotnet publish src/Inventering.AdkBridge -c Release -o C:\Inventering\AdkBridge
-   ```
-   Kopiera även `lib\*.dll` till `C:\Inventering\AdkBridge` om de inte kom med.
-3. Ställ in `C:\Inventering\appsettings.json`:
-   - `Visma:Mode` = `Adk`
-   - HTTPS, se nedan
-   - Bolagen läggs upp i admin under **Bolag** efter start.
-3. Installera och starta som tjänst (kör som administratör):
-   ```
-   sc.exe create Inventering binPath= "C:\Inventering\Inventering.Web.exe" start= delayed-auto
-   sc.exe start Inventering
-   ```
-   Tjänstekontot måste ha läs- och skrivrätt till Visma-företagets katalog.
-4. Öppna porten i Windows-brandväggen, bara för lokalnätet.
-5. Data (SQLite, nycklar, första lösenord) hamnar i `C:\ProgramData\Inventering`. Ta med katalogen i backupen.
+**1. Bygg paketet** på en utvecklingsdator med .NET 8 SDK. Lägg först `AvSynkLib.dll` och
+`AdkNet4Wrapper.dll` i `lib\`.
 
-### HTTPS (krävs för kameran)
-
-Mobilens webbläsare tillåter bara kameran över HTTPS. Bästa lösningen är ett riktigt certifikat
-för ett internt namn, t.ex. `inventering.foretaget.se`, som i intern DNS pekar på serverns LAN-IP.
-Certifikatet tas ut från Let's Encrypt via DNS-validering, t.ex. med win-acme. Se [docs/ARKITEKTUR.md](docs/ARKITEKTUR.md) §8.
-
-```json
-"Kestrel": {
-  "Endpoints": {
-    "Https": {
-      "Url": "https://0.0.0.0:443",
-      "Certificate": { "Path": "C:\\Inventering\\cert.pfx", "Password": "..." }
-    }
-  }
-}
+```powershell
+.\deploy\bygg-paket.ps1          # → dist\Inventering (app\, installera.ps1, LÄS MIG.txt)
 ```
 
-Det går också att läsa certifikatet från Windows certifikatarkiv, med `"Subject"`, `"Store": "My"` och `"Location": "LocalMachine"`.
-Utan HTTPS fungerar sökfältet och handskannrar i tangentbordsläge, men inte kameran.
+**2. Installera på servern.** Kopiera `dist\Inventering` till servern och kör som administratör:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\installera.ps1
+```
+
+Skriptet frågar efter installations- och datamapp, portar och **hur https ska ordnas**:
+
+| Val | Vad skriptet gör | Passar när |
+|---|---|---|
+| 1. Egen intern certifikatutfärdare (rekommenderas) | Skapar ett rotcertifikat (10 år) och ett servercertifikat för serverns namn och IP-adresser, signerat av rotcertifikatet. | Tjänsten används på det interna nätet. Varje telefon installerar rotcertifikatet en gång, sedan blir det inga varningar. |
+| 2. Självsignerat certifikat | Skapar ett servercertifikat utan utfärdare. | Snabbtest. Webbläsaren varnar, och iPhone glömmer ofta undantaget. |
+| 3. Befintligt certifikat (.pfx) | Importerar certifikatet, t.ex. från Let's Encrypt/win-acme eller företagets CA. | Ni har en domän eller en egen CA. |
+| 4. Inget https | Bara http. | Bara handskannrar, ingen kamera. |
+
+Skriptet installerar och startar sedan Windows-tjänsten "Inventering" med automatisk omstart
+vid fel. Det öppnar portarna i brandväggen, bara för domän- och privata nätverk, och skriver
+`appsettings.Production.json`. Till sist visar det adresserna och var första admin-lösenordet finns.
+
+**Telefonerna:** vid val 1 eller 2 öppnar man `http://<servern>/certifikat.html` på varje telefon.
+Sidan nås över vanlig http och har en knapp för att hämta certifikatet, steg för iPhone och Android
+samt en QR-kod när den visas på en dator. All annan trafik skickas vidare till https.
+
+**Uppdatera:** kör `installera.ps1` från ett nytt paket. Inställningar och data behålls.
+**Byta certifikat:** `.\installera.ps1 -BaraCertifikat`. Servercertifikaten gäller i 825 dagar,
+vilket är det längsta iPhone godtar. Rotcertifikatet återanvänds vid förnyelse, så telefonerna
+behöver inte installera något nytt.
+
+Tjänsten väljer servercertifikat ur `LocalMachine\My` via tumavtryck. Saknas det tar den det
+nyaste giltiga certifikatet med samma namn, vilket gör att win-acme-förnyelser fungerar efter
+en omstart. Ett rotcertifikat väljs aldrig.
 
 ### Öppna från Visma Administration
 
@@ -232,5 +232,5 @@ dotnet ef migrations add <Namn> --project src/Inventering.Web --output-dir Data/
 
 1. Testa ADK-bryggan mot ett **testföretag** i Visma. Kör först `status`, sedan `articles`, sedan
    `inventory-write` på några artiklar. Kontrollera underlaget i Visma.
-2. Ta fram certifikat och DNS-namn, och installera på servern.
+2. Installera på servern med `installera.ps1` och välj certifikat. Installera rotcertifikatet på telefonerna.
 

@@ -10,3 +10,4 @@ data/
 TestResults/
 lib/*.dll
 design-time.db
+dist/

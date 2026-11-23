@@ -1,0 +1,31 @@
+Inventering – installation på Visma-servern
+==========================================
+
+1. Kopiera hela mappen till servern, t.ex. till C:\Temp\Inventering.
+2. Starta PowerShell som administratör och kör:
+
+     cd C:\Temp\Inventering
+     powershell -ExecutionPolicy Bypass -File .\installera.ps1
+
+3. Svara på frågorna. Tryck Enter för att välja förslaget.
+
+Skriptet frågar hur https ska ordnas:
+
+  1. Egen intern certifikatutfärdare (rekommenderas för internt nät)
+     Skapar ett rotcertifikat och ett servercertifikat. Varje telefon installerar
+     rotcertifikatet en gång via http://<servern>/certifikat.html – sedan inga varningar.
+  2. Självsignerat certifikat
+     Enklast, men webbläsaren varnar första gången (och på iPhone ofta igen).
+  3. Befintligt certifikat (.pfx)
+     T.ex. från Let's Encrypt/win-acme eller företagets egen certifikatutfärdare.
+  4. Inget https
+     Bara http. Mobilens kamera fungerar inte, men handskannrar och sökfältet gör det.
+
+Uppdatera till en ny version: kör installera.ps1 från det nya paketet. Inställningar och
+data behålls, och databasen säkerhetskopieras automatiskt före uppdateringen.
+
+Byta certifikat i efterhand: .\installera.ps1 -BaraCertifikat
+
+Servercertifikaten (alternativ 1 och 2) gäller i 825 dagar, vilket är det längsta iPhone
+godtar. Kör .\installera.ps1 -BaraCertifikat innan de går ut – rotcertifikatet återanvänds,
+så telefonerna behöver inte installera något nytt.

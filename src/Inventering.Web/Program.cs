@@ -26,6 +26,19 @@ var dataDir = builder.Configuration["DataDirectory"] is { Length: > 0 } d
 Directory.CreateDirectory(dataDir);
 
 builder.Services.Configure<SecurityOptions>(builder.Configuration.GetSection("Security"));
+builder.Services.Configure<HttpsOptions>(builder.Configuration.GetSection("Https"));
+// Servercertifikatet hämtas ur Windows certifikatarkiv (se installera.ps1). Endpointen "Https" i
+// Kestrel-konfigurationen behöver då bara en Url.
+var httpsCfg = builder.Configuration.GetSection("Https").Get<HttpsOptions>() ?? new HttpsOptions();
+if (httpsCfg.Enabled && OperatingSystem.IsWindows() && (!string.IsNullOrWhiteSpace(httpsCfg.Thumbprint) || !string.IsNullOrWhiteSpace(httpsCfg.Subject)))
+{
+    builder.WebHost.ConfigureKestrel(k => k.ConfigureHttpsDefaults(h =>
+    {
+        using var lf = LoggerFactory.Create(l => l.AddConsole());
+        var cert = HttpsSetup.FindServerCertificate(httpsCfg, lf.CreateLogger("Https"));
+        if (cert != null) h.ServerCertificate = cert;
+    }));
+}
 builder.Services.AddDbContext<AppDb>(o => o.UseSqlite($"Data Source={Path.Combine(dataDir, "inventory.db")}"));
 // Nycklar för cookies sparas på disk så att inloggningar överlever omstart av tjänsten.
 var dp = builder.Services.AddDataProtection().SetApplicationName("Inventering")
@@ -149,7 +162,11 @@ app.Use(async (ctx, next) =>
     if (ctx.Request.Path.StartsWithSegments("/api")) h.CacheControl = "no-store";
     await next();
 });
-if (!app.Environment.IsDevelopment()) app.UseHsts();
+// HSTS bara när certifikatet är betrott av enheterna – annars kan ett självsignerat certifikat låsa ute användarna.
+var httpsMode = app.Configuration["Https:Mode"] ?? "None";
+if (!app.Environment.IsDevelopment() && (httpsMode.Equals("InternalCa", StringComparison.OrdinalIgnoreCase) || httpsMode.Equals("Existing", StringComparison.OrdinalIgnoreCase)))
+    app.UseHsts();
+app.UseHttpsRedirectForApp();
 
 // CSRF-skydd: alla ändrande API-anrop måste ha ett eget huvud, vilket en annan webbplats
 // inte kan skicka utan CORS-godkännande. Kombineras med SameSite=Strict-cookie.
@@ -172,6 +189,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapGet("/api/health", () => Results.Ok(new { ok = true }));
+app.MapCertificateEndpoints();
 app.MapAuth();
 app.MapCount();
 app.MapAdmin();
